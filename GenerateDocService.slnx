@@ -1,0 +1,23 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Clients/">
+    <Project Path="src/Clients/GenerateDocService.SampleClient/GenerateDocService.SampleClient.csproj" />
+  </Folder>
+  <Folder Name="/src/Engines/">
+    <Project Path="src/Engines/GenerateDocService.Engine.Abstractions/GenerateDocService.Engine.Abstractions.csproj" />
+  </Folder>
+  <Folder Name="/src/Host/">
+    <Project Path="src/Host/GenerateDocService.Api/GenerateDocService.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/DocumentProcessing/">
+    <Project Path="src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Application/GenerateDocService.DocumentProcessing.Application.csproj" />
+    <Project Path="src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Domain/GenerateDocService.DocumentProcessing.Domain.csproj" />
+    <Project Path="src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Infrastructure/GenerateDocService.DocumentProcessing.Infrastructure.csproj" />
+    <Project Path="src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Presentation/GenerateDocService.DocumentProcessing.Presentation.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/Unit/">
+    <Project Path="tests/Unit/GenerateDocService.DocumentProcessing.Application.Tests/GenerateDocService.DocumentProcessing.Application.Tests.csproj" />
+  </Folder>
+</Solution>
