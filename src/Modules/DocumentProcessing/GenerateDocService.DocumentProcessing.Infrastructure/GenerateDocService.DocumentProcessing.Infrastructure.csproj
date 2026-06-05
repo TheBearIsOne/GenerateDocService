@@ -1,7 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="MassTransit" Version="9.1.2" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="9.1.2" />
+    <PackageReference Include="Minio" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.8" />
+    <PackageReference Include="StackExchange.Redis" Version="2.13.17" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\GenerateDocService.DocumentProcessing.Application\GenerateDocService.DocumentProcessing.Application.csproj" />
+    <ProjectReference Include="..\..\..\Engines\GenerateDocService.Engine.Scriban\GenerateDocService.Engine.Scriban.csproj" />
+    <ProjectReference Include="..\..\..\Engines\GenerateDocService.Engine.QuestPdf\GenerateDocService.Engine.QuestPdf.csproj" />
+    <ProjectReference Include="..\..\..\Engines\GenerateDocService.Engine.DotLiquid\GenerateDocService.Engine.DotLiquid.csproj" />
   </ItemGroup>
 
   <ItemGroup>

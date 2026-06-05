@@ -1,8 +1,8 @@
-using GenerateDocService.Engine.Abstractions;
+using GenerateDocService.DocumentProcessing.Application.Messaging;
 
 namespace GenerateDocService.DocumentProcessing.Application.Abstractions.Messaging;
 
 public interface IBackgroundGenerationScheduler
 {
-    Task<string> EnqueueAsync(IReportRequest request, CancellationToken cancellationToken = default);
+    Task<string> EnqueueAsync(GenerateDocumentRequested message, CancellationToken cancellationToken = default);
 }

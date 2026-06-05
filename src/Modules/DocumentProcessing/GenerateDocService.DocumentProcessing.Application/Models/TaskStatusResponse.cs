@@ -6,6 +6,7 @@ public sealed record TaskStatusResponse(
     string TaskId,
     GenerationTaskStatus Status,
     string? ResultFileName,
+    string? ResultStoragePath,
     string? Error,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? UpdatedAtUtc);

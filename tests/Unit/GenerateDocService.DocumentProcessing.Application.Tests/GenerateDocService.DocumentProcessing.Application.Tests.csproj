@@ -22,6 +22,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Modules\DocumentProcessing\GenerateDocService.DocumentProcessing.Application\GenerateDocService.DocumentProcessing.Application.csproj" />
     <ProjectReference Include="..\..\..\src\Engines\GenerateDocService.Engine.Abstractions\GenerateDocService.Engine.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Engines\GenerateDocService.Engine.Scriban\GenerateDocService.Engine.Scriban.csproj" />
+    <ProjectReference Include="..\..\..\src\Engines\GenerateDocService.Engine.QuestPdf\GenerateDocService.Engine.QuestPdf.csproj" />
+    <ProjectReference Include="..\..\..\src\Engines\GenerateDocService.Engine.DotLiquid\GenerateDocService.Engine.DotLiquid.csproj" />
+    <ProjectReference Include="..\..\..\src\Host\GenerateDocService.Api\GenerateDocService.Api.csproj" />
     <ProjectReference Include="..\..\..\src\Modules\DocumentProcessing\GenerateDocService.DocumentProcessing.Infrastructure\GenerateDocService.DocumentProcessing.Infrastructure.csproj" />
   </ItemGroup>
 

@@ -4,6 +4,12 @@ using GenerateDocService.Engine.Abstractions;
 
 namespace GenerateDocService.DocumentProcessing.Infrastructure.Engines;
 
+[DocumentEngine(
+    "fake",
+    InputFormats = new[] { "json", "xml", "csv", "html", "markdown" },
+    OutputFormats = new[] { "txt", "json", "html" },
+    TemplateFormats = new[] { "scriban", "liquid", "html", "markdown" },
+    Priority = 0)]
 public sealed class FakeDocumentGenerationEngine : IDocumentGenerationEngine
 {
     public string Name => "fake";

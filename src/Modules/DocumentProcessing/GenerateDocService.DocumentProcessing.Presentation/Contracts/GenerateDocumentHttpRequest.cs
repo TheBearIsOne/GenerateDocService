@@ -2,7 +2,7 @@ namespace GenerateDocService.DocumentProcessing.Presentation.Contracts;
 
 public sealed record GenerateDocumentHttpRequest(
     string? RequestId,
-    string Engine,
+    string? Engine,
     string InputFormat,
     string OutputFormat,
     string? TemplateFormat,

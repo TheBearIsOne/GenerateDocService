@@ -1,12 +1,13 @@
 using GenerateDocService.DocumentProcessing.Application.Abstractions.Messaging;
-using GenerateDocService.Engine.Abstractions;
+using GenerateDocService.DocumentProcessing.Application.Messaging;
 
 namespace GenerateDocService.DocumentProcessing.Application.Services;
 
-public sealed class InMemoryBackgroundGenerationScheduler : IBackgroundGenerationScheduler
+public sealed class InMemoryBackgroundGenerationScheduler(IBackgroundDocumentGenerationProcessor processor) : IBackgroundGenerationScheduler
 {
-    public Task<string> EnqueueAsync(IReportRequest request, CancellationToken cancellationToken = default)
+    public Task<string> EnqueueAsync(GenerateDocumentRequested message, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(request.RequestId);
+        _ = Task.Run(() => processor.ProcessAsync(message, CancellationToken.None), CancellationToken.None);
+        return Task.FromResult(message.TaskId);
     }
 }

@@ -5,6 +5,9 @@
   </Folder>
   <Folder Name="/src/Engines/">
     <Project Path="src/Engines/GenerateDocService.Engine.Abstractions/GenerateDocService.Engine.Abstractions.csproj" />
+    <Project Path="src/Engines/GenerateDocService.Engine.DotLiquid/GenerateDocService.Engine.DotLiquid.csproj" />
+    <Project Path="src/Engines/GenerateDocService.Engine.QuestPdf/GenerateDocService.Engine.QuestPdf.csproj" />
+    <Project Path="src/Engines/GenerateDocService.Engine.Scriban/GenerateDocService.Engine.Scriban.csproj" />
   </Folder>
   <Folder Name="/src/Host/">
     <Project Path="src/Host/GenerateDocService.Api/GenerateDocService.Api.csproj" />
@@ -17,6 +20,12 @@
     <Project Path="src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Presentation/GenerateDocService.DocumentProcessing.Presentation.csproj" />
   </Folder>
   <Folder Name="/tests/" />
+  <Folder Name="/tests/Integration/">
+    <Project Path="tests/Integration/GenerateDocService.Api.IntegrationTests/GenerateDocService.Api.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Performance/">
+    <Project Path="tests/Performance/GenerateDocService.LoadTests.NBomber/GenerateDocService.LoadTests.NBomber.csproj" />
+  </Folder>
   <Folder Name="/tests/Unit/">
     <Project Path="tests/Unit/GenerateDocService.DocumentProcessing.Application.Tests/GenerateDocService.DocumentProcessing.Application.Tests.csproj" />
   </Folder>

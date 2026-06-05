@@ -1,0 +1,52 @@
+version: '3.9'
+
+services:
+  generatedocservice-api:
+    image: generatedocservice-api:dev
+    build:
+      context: ../..
+      dockerfile: src/Host/GenerateDocService.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      DocumentProcessing__Caching__Provider: Redis
+      DocumentProcessing__Caching__Redis__ConnectionString: redis:6379
+      DocumentProcessing__Messaging__Transport: RabbitMQ
+      DocumentProcessing__Messaging__RabbitMq__Host: rabbitmq
+      DocumentProcessing__Messaging__RabbitMq__Port: 5672
+      DocumentProcessing__Messaging__RabbitMq__Username: guest
+      DocumentProcessing__Messaging__RabbitMq__Password: guest
+      DocumentProcessing__Storage__Provider: ObjectStorage
+      DocumentProcessing__Storage__ObjectStorage__Endpoint: http://minio:9000
+      DocumentProcessing__Storage__ObjectStorage__BucketName: documents
+      DocumentProcessing__Storage__ObjectStorage__AccessKey: minioadmin
+      DocumentProcessing__Storage__ObjectStorage__SecretKey: minioadmin
+      DocumentProcessing__Storage__ObjectStorage__UseSsl: 'false'
+      DocumentProcessing__Storage__ObjectStorage__CreateBucketIfMissing: 'true'
+    ports:
+      - "8080:8080"
+    depends_on:
+      - rabbitmq
+      - redis
+      - minio
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"

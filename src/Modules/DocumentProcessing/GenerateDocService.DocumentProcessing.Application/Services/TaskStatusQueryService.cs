@@ -17,6 +17,7 @@ public sealed class TaskStatusQueryService(IDocumentGenerationTaskRepository rep
             task.TaskId,
             task.Status,
             task.ResultFileName,
+            task.ResultStoragePath,
             task.Error,
             task.CreatedAtUtc,
             task.UpdatedAtUtc);

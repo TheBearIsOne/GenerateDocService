@@ -18,6 +18,7 @@ public sealed class DocumentGenerationTask
     public string OutputFormat { get; }
     public GenerationTaskStatus Status { get; private set; }
     public string? ResultFileName { get; private set; }
+    public string? ResultStoragePath { get; private set; }
     public string? Error { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset? UpdatedAtUtc { get; private set; }
@@ -28,10 +29,11 @@ public sealed class DocumentGenerationTask
         UpdatedAtUtc = DateTimeOffset.UtcNow;
     }
 
-    public void MarkCompleted(string resultFileName)
+    public void MarkCompleted(string resultFileName, string? resultStoragePath = null)
     {
         Status = GenerationTaskStatus.Completed;
         ResultFileName = resultFileName;
+        ResultStoragePath = resultStoragePath;
         Error = null;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
     }
@@ -39,6 +41,7 @@ public sealed class DocumentGenerationTask
     public void MarkFailed(string error)
     {
         Status = GenerationTaskStatus.Failed;
+        ResultStoragePath = null;
         Error = error;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
     }

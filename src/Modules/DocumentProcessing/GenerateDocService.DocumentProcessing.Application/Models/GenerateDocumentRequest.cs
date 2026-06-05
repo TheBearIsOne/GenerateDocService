@@ -32,4 +32,35 @@ public sealed class GenerateDocumentRequest : IReportRequest
     public ReadOnlyMemory<byte> Payload { get; }
     public ReadOnlyMemory<byte>? Template { get; }
     public IReadOnlyDictionary<string, string> Metadata { get; }
+
+    public GenerateDocumentRequest WithMetadata(string key, string value)
+    {
+        var metadata = new Dictionary<string, string>(Metadata, StringComparer.OrdinalIgnoreCase)
+        {
+            [key] = value
+        };
+
+        return new GenerateDocumentRequest(
+            RequestId,
+            Engine,
+            InputFormat,
+            OutputFormat,
+            TemplateFormat,
+            Payload.ToArray(),
+            Template?.ToArray(),
+            metadata);
+    }
+
+    public GenerateDocumentRequest WithEngine(string engine)
+    {
+        return new GenerateDocumentRequest(
+            RequestId,
+            engine,
+            InputFormat,
+            OutputFormat,
+            TemplateFormat,
+            Payload.ToArray(),
+            Template?.ToArray(),
+            Metadata);
+    }
 }
