@@ -124,6 +124,42 @@ public sealed class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Pr
         content.Should().Be("Document: hello for Ada Lovelace");
     }
 
+    [Fact]
+    public async Task AsyncGeneration_WithoutEngine_ShouldAutoSelectMatchingEngine()
+    {
+        using var client = CreateClient();
+
+        var request = new GenerateDocumentHttpRequest(
+            RequestId: Guid.NewGuid().ToString("N"),
+            Engine: null,
+            InputFormat: "json",
+            OutputFormat: "txt",
+            TemplateFormat: "scriban",
+            Payload: "{\"document\":\"hello\",\"customer\":{\"name\":\"Ada Lovelace\"}}",
+            Template: "Document: {{ document }} for {{ customer.name }}",
+            Metadata: new Dictionary<string, string>
+            {
+                ["client"] = "integration-test",
+                ["scenario"] = "auto-engine-selection-async"
+            });
+
+        var createResponse = await client.PostAsJsonAsync("/api/v1/documents/async", request);
+        var accepted = await createResponse.Content.ReadFromJsonAsync<TaskStatusHttpResponse>();
+
+        createResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        accepted.Should().NotBeNull();
+
+        var completed = await WaitForCompletionAsync(client, accepted!.TaskId);
+        completed.Status.Should().Be(GenerateDocService.DocumentProcessing.Domain.Tasks.GenerationTaskStatus.Completed);
+        completed.DownloadUrl.Should().NotBeNullOrWhiteSpace();
+
+        var downloadResponse = await client.GetAsync(completed.DownloadUrl!);
+        var content = await downloadResponse.Content.ReadAsStringAsync();
+
+        downloadResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        content.Should().Be("Document: hello for Ada Lovelace");
+    }
+
     private HttpClient CreateClient()
         => _factory.CreateClient(new WebApplicationFactoryClientOptions
         {

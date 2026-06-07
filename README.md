@@ -9,9 +9,13 @@ Current first iteration includes:
 - solution and project structure for Domain, Application, Infrastructure, Presentation, Host, and Client;
 - engine abstractions;
 - first real engine module based on Scriban templates;
+- second template engine based on DotLiquid;
 - QuestPDF PDF generation engine scaffold;
+- template parser registry for pluggable template providers;
 - in-memory compiled template cache foundation for template parsers;
+- Redis-backed compiled template cache support;
 - metadata-driven engine registry and task repository;
+- automatic engine selection by capability and priority when `engine` is omitted;
 - async messaging contracts and MassTransit-based background processing pipeline scaffold;
 - in-memory deduplication and generated document cache abstractions ready for Redis replacement;
 - infrastructure options for Redis-backed cache/deduplication and object storage providers;
@@ -25,12 +29,19 @@ Current first iteration includes:
 - demo `fake` generation engine;
 - sync and async HTTP endpoints;
 - sample .NET client;
+- NBomber-based performance baseline project;
 - unit and integration test coverage.
+
+## Documentation
+
+- Architecture and call-flow diagrams: `docs/architecture.md`
+- Improvement plan and roadmap: `docs/improvement-plan.md`
 
 ## Projects
 
 - `src/Engines/GenerateDocService.Engine.Abstractions`
 - `src/Engines/GenerateDocService.Engine.Scriban`
+- `src/Engines/GenerateDocService.Engine.DotLiquid`
 - `src/Engines/GenerateDocService.Engine.QuestPdf`
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Domain`
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Application`
@@ -40,6 +51,7 @@ Current first iteration includes:
 - `src/Clients/GenerateDocService.SampleClient`
 - `tests/Unit/GenerateDocService.DocumentProcessing.Application.Tests`
 - `tests/Integration/GenerateDocService.Api.IntegrationTests`
+- `tests/Performance/GenerateDocService.LoadTests.NBomber`
 
 ## Engine registration
 
@@ -54,6 +66,7 @@ Current engines:
 
 - `fake` for simple scaffolding and smoke flows;
 - `scriban` for template-driven text, markdown, html, and json generation from JSON payloads;
+- `dotliquid` for template-driven text, markdown, html, and json generation from JSON payloads;
 - `questpdf` for JSON-to-PDF generation.
 
 This keeps the current modular monolith ready for future extraction of engines into isolated modules or services.
@@ -185,6 +198,8 @@ Example request body:
 }
 ```
 
+`engine` can be omitted for auto-selection. In that case the application chooses the highest-priority registered engine that can handle the requested `inputFormat`, `outputFormat`, and `templateFormat`.
+
 Example async status response:
 
 ```json
@@ -216,9 +231,11 @@ Unit tests cover:
 Integration tests currently cover:
 
 - engine discovery endpoint;
+- sync generation endpoint;
 - async generation endpoint;
 - task polling;
 - artifact download endpoint;
+- sync and async auto-selection when `engine` is omitted;
 - correlation id header propagation through HTTP responses.
 
 Run unit tests:
@@ -232,6 +249,75 @@ Run integration tests:
 ```powershell
 dotnet test tests/Integration/GenerateDocService.Api.IntegrationTests/GenerateDocService.Api.IntegrationTests.csproj
 ```
+
+## Performance baseline
+
+The repository includes an NBomber-based baseline project:
+
+- `tests/Performance/GenerateDocService.LoadTests.NBomber`
+
+Current profiles support:
+
+- `sync_scriban_explicit`
+- `async_scriban_explicit`
+- `sync_scriban_auto`
+- `async_scriban_auto`
+- `sync_scriban_warm`
+- `sync_scriban_cold`
+- `sync_dotliquid_explicit`
+- `async_dotliquid_explicit`
+- `sync_dotliquid_auto`
+- `async_dotliquid_auto`
+- `sync_dotliquid_warm`
+- `sync_dotliquid_cold`
+- `sync_questpdf`
+
+The first CLI argument is the API base URL.
+The second CLI argument selects the sync profile.
+The third CLI argument selects the async profile.
+
+Example: compare explicit Scriban routing against auto-selection routing:
+
+```powershell
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_explicit async_scriban_auto
+```
+
+Example: run PDF baseline together with explicit async Scriban:
+
+```powershell
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_questpdf async_scriban_explicit
+```
+
+Example: compare warm vs cold template-cache path for Scriban:
+
+```powershell
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_warm async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_cold async_scriban_explicit
+```
+
+Example: compare Scriban and DotLiquid on the same sync text-generation flow:
+
+```powershell
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_explicit async_dotliquid_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_dotliquid_explicit async_scriban_explicit
+```
+
+By default, NBomber reports are written to:
+
+- `artifacts/perf/<timestamp>-<sync-profile>-<async-profile>`
+
+You can override the report root with a fourth CLI argument:
+
+```powershell
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_warm async_scriban_explicit .\artifacts\perf
+```
+
+Recommended baseline comparison workflow:
+
+1. Run one warm-cache baseline.
+2. Run one cold-cache baseline.
+3. Compare Scriban and DotLiquid using the same input/output shape.
+4. Keep report folders as historical snapshots for regression comparison.
 
 ## Run
 
