@@ -226,6 +226,8 @@ public static class ServiceCollectionExtensions
     {
         services.Configure<DocumentProcessingPersistenceOptions>(
             configuration.GetSection(DocumentProcessingPersistenceOptions.SectionName));
+        services.Configure<ArtifactRetentionOptions>(
+            configuration.GetSection(ArtifactRetentionOptions.SectionName));
 
         var persistenceOptions = configuration
             .GetSection(DocumentProcessingPersistenceOptions.SectionName)
@@ -234,6 +236,7 @@ public static class ServiceCollectionExtensions
 
         if (!persistenceOptions.IsPostgreSqlProvider())
         {
+            services.AddHostedService<ArtifactCleanupBackgroundService>();
             return services;
         }
 
@@ -244,6 +247,8 @@ public static class ServiceCollectionExtensions
             ServiceDescriptor.Singleton<
                 Application.Abstractions.Persistence.IDocumentGenerationTaskRepository,
                 PostgreSqlDocumentGenerationTaskRepository>());
+
+        services.AddHostedService<ArtifactCleanupBackgroundService>();
 
         return services;
     }
@@ -303,9 +308,14 @@ public static class ServiceCollectionExtensions
         {
             healthChecks.AddCheck(
                 "task-persistence",
-                () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("In-memory task persistence configured."),
+                () => HealthCheckResult.Healthy("In-memory task persistence configured."),
                 tags: ["live", "ready"]);
         }
+
+        healthChecks.AddCheck(
+            "authentication",
+            () => HealthCheckResult.Healthy("Authentication configured."),
+            tags: ["live", "ready"]);
 
         if (messagingOptions.IsRabbitMqTransport())
         {

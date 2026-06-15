@@ -1,28 +1,28 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-GenerateDocService.Worker</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
-    <PackageReference Include="AspNetCore.HealthChecks.UI.Client" Version="9.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.12.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.12.0" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.12.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.12.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.12.0" />
-    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Modules\DocumentProcessing\GenerateDocService.DocumentProcessing.Application\GenerateDocService.DocumentProcessing.Application.csproj" />
     <ProjectReference Include="..\..\Modules\DocumentProcessing\GenerateDocService.DocumentProcessing.Infrastructure\GenerateDocService.DocumentProcessing.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\DocumentProcessing\GenerateDocService.DocumentProcessing.Presentation\GenerateDocService.DocumentProcessing.Presentation.csproj" />
+    <ProjectReference Include="..\..\Modules\DocumentProcessing\GenerateDocService.DocumentProcessing.Application\GenerateDocService.DocumentProcessing.Application.csproj" />
+    <ProjectReference Include="..\..\Engines\GenerateDocService.Engine.Scriban\GenerateDocService.Engine.Scriban.csproj" />
+    <ProjectReference Include="..\..\Engines\GenerateDocService.Engine.DotLiquid\GenerateDocService.Engine.DotLiquid.csproj" />
+    <ProjectReference Include="..\..\Engines\GenerateDocService.Engine.QuestPdf\GenerateDocService.Engine.QuestPdf.csproj" />
   </ItemGroup>
 
 </Project>

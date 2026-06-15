@@ -361,11 +361,11 @@ As of 2026-06-14, the project is **before Phase 1**. All items in Section 10 are
 
 1. ~~Add `docs/performance-baseline.md` or extend performance docs with standard benchmark matrix.~~ **DONE**
 2. ~~Implement durable task repository.~~ **DONE** — EF Core + PostgreSQL, provider switching via `DocumentProcessing:Persistence:Provider`
-3. Add request validation and payload/template size limits.
-4. Add authentication and authorization.
-5. Create a dedicated worker host.
-6. Add retention and cleanup for stored artifacts.
-7. Expand integration tests for production-like providers.
+3. ~~Add request validation and payload/template size limits.~~ **DONE** — configurable limits on payload, template, metadata, and format names via endpoint filter
+4. ~~Add authentication and authorization.~~ **DONE** — JWT bearer auth with role-based policies, disabled by default for local dev
+5. ~~Create a dedicated worker host.~~ **DONE** — separate `GenerateDocService.Worker` project, MassTransit consumer runs independently of API
+6. ~~Add retention and cleanup for stored artifacts.~~ **DONE** — configurable retention (30d completed, 7d failed), background cleanup job with `DeleteAsync` on artifact store
+7. ~~Expand integration tests for production-like providers.~~ **DONE** — 16 new tests covering validation errors, edge cases, failed generation paths, and in-progress download behavior (total: 21 integration tests)
 
 ---
 

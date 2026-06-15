@@ -33,6 +33,34 @@ services:
       - minio
       - postgres
 
+  generatedocservice-worker:
+    image: generatedocservice-worker:dev
+    build:
+      context: ../..
+      dockerfile: src/Host/GenerateDocService.Worker/Dockerfile
+    environment:
+      DocumentProcessing__Caching__Provider: Redis
+      DocumentProcessing__Caching__Redis__ConnectionString: redis:6379
+      DocumentProcessing__Messaging__Transport: RabbitMQ
+      DocumentProcessing__Messaging__RabbitMq__Host: rabbitmq
+      DocumentProcessing__Messaging__RabbitMq__Port: 5672
+      DocumentProcessing__Messaging__RabbitMq__Username: guest
+      DocumentProcessing__Messaging__RabbitMq__Password: guest
+      DocumentProcessing__Storage__Provider: ObjectStorage
+      DocumentProcessing__Storage__ObjectStorage__Endpoint: http://minio:9000
+      DocumentProcessing__Storage__ObjectStorage__BucketName: documents
+      DocumentProcessing__Storage__ObjectStorage__AccessKey: minioadmin
+      DocumentProcessing__Storage__ObjectStorage__SecretKey: minioadmin
+      DocumentProcessing__Storage__ObjectStorage__UseSsl: 'false'
+      DocumentProcessing__Storage__ObjectStorage__CreateBucketIfMissing: 'true'
+      DocumentProcessing__Persistence__Provider: PostgreSql
+      DocumentProcessing__Persistence__PostgreSql__ConnectionString: Host=postgres;Port=5432;Database=generatedocservice;Username=postgres;Password=postgres
+    depends_on:
+      - rabbitmq
+      - redis
+      - minio
+      - postgres
+
   rabbitmq:
     image: rabbitmq:3-management
     ports:

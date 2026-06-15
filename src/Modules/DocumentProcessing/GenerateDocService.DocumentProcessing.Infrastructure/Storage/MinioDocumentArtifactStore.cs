@@ -91,4 +91,22 @@ public sealed class MinioDocumentArtifactStore(
             new MakeBucketArgs().WithBucket(bucketName),
             cancellationToken);
     }
+
+    public async Task DeleteAsync(string storagePath, CancellationToken cancellationToken = default)
+    {
+        var separatorIndex = storagePath.IndexOf('/');
+        if (separatorIndex <= 0 || separatorIndex == storagePath.Length - 1)
+        {
+            return;
+        }
+
+        var bucketName = storagePath[..separatorIndex];
+        var objectKey = storagePath[(separatorIndex + 1)..];
+
+        await minioClient.RemoveObjectAsync(
+            new RemoveObjectArgs()
+                .WithBucket(bucketName)
+                .WithObject(objectKey),
+            cancellationToken);
+    }
 }

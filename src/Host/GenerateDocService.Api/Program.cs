@@ -1,11 +1,14 @@
 using System.Text;
 using GenerateDocService.Api.Correlation;
+using GenerateDocService.Api.Security;
+using GenerateDocService.Api.Validation;
 using GenerateDocService.DocumentProcessing.Application.Abstractions.Engines;
 using GenerateDocService.DocumentProcessing.Application.Models;
 using GenerateDocService.DocumentProcessing.Application.Services;
 using GenerateDocService.DocumentProcessing.Infrastructure.DependencyInjection;
 using GenerateDocService.DocumentProcessing.Presentation.Contracts;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -25,6 +28,22 @@ builder.Host.UseSerilog((context, _, loggerConfiguration) =>
 
 builder.Services.AddOpenApi();
 builder.Services.AddDocumentProcessingInfrastructure(builder.Configuration);
+
+var authOptions = builder.Configuration
+    .GetSection(AuthenticationOptions.SectionName)
+    .Get<AuthenticationOptions>()
+    ?? new AuthenticationOptions();
+
+builder.Services.AddDocumentAuthentication(builder.Configuration, authOptions);
+
+builder.Services.Configure<DocumentProcessingValidationOptions>(
+    builder.Configuration.GetSection(DocumentProcessingValidationOptions.SectionName));
+builder.Services.AddSingleton<GenerateDocumentRequestValidator>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<DocumentProcessingValidationOptions>>().Value;
+    return new GenerateDocumentRequestValidator(options);
+});
+builder.Services.AddTransient<ValidationRequestFilter>();
 builder.Services
     .AddOpenTelemetry()
     .ConfigureResource(resource => resource.AddService("GenerateDocService.Api"))
@@ -60,6 +79,12 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 
+if (authOptions.Enabled)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
+
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
     Predicate = registration => registration.Tags.Contains("live")
@@ -88,7 +113,8 @@ app.MapGet("/api/v1/engines", (IDocumentGenerationEngineRegistry registry) =>
 .WithTags("Engines")
 .WithSummary("List registered document generation engines.")
 .WithDescription("Returns engine metadata including supported formats, template formats, priority, and implementation type.")
-.Produces<DocumentEngineHttpResponse[]>(StatusCodes.Status200OK);
+.Produces<DocumentEngineHttpResponse[]>(StatusCodes.Status200OK)
+    .MaybeRequireAuth(AuthorizationPolicies.DocumentRead, authOptions.Enabled);
 
 app.MapGet("/api/v1/engines/{name}", (string name, IDocumentGenerationEngineRegistry registry) =>
 {
@@ -103,7 +129,8 @@ app.MapGet("/api/v1/engines/{name}", (string name, IDocumentGenerationEngineRegi
 .WithSummary("Get a registered document generation engine by name.")
 .WithDescription("Returns metadata for a specific engine if it is registered.")
 .Produces<DocumentEngineHttpResponse>(StatusCodes.Status200OK)
-.Produces(StatusCodes.Status404NotFound);
+.Produces(StatusCodes.Status404NotFound)
+    .MaybeRequireAuth(AuthorizationPolicies.DocumentRead, authOptions.Enabled);
 
 app.MapPost("/api/v1/documents/sync", async (
     GenerateDocumentHttpRequest request,
@@ -119,6 +146,7 @@ app.MapPost("/api/v1/documents/sync", async (
         result.ContentType,
         result.FileName);
 })
+.AddEndpointFilter<ValidationRequestFilter>()
 .WithName("GenerateDocumentSync")
 .WithTags("Documents")
 .WithSummary("Generate a document synchronously.")
@@ -126,7 +154,10 @@ app.MapPost("/api/v1/documents/sync", async (
 .Accepts<GenerateDocumentHttpRequest>("application/json")
 .Produces(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status400BadRequest)
-.Produces(StatusCodes.Status500InternalServerError);
+.Produces(StatusCodes.Status401Unauthorized)
+.Produces(StatusCodes.Status403Forbidden)
+.Produces(StatusCodes.Status500InternalServerError)
+    .MaybeRequireAuth(AuthorizationPolicies.DocumentSubmit, authOptions.Enabled);
 
 app.MapPost("/api/v1/documents/async", async (
     GenerateDocumentHttpRequest request,
@@ -139,6 +170,7 @@ app.MapPost("/api/v1/documents/async", async (
 
     return Results.Accepted($"/api/v1/tasks/{result.TaskId}", DocumentResponseMapper.ToHttpResponse(result, BuildDownloadUrl(httpContext, result)));
 })
+.AddEndpointFilter<ValidationRequestFilter>()
 .WithName("GenerateDocumentAsync")
 .WithTags("Documents")
 .WithSummary("Queue a document generation request for asynchronous processing.")
@@ -146,7 +178,10 @@ app.MapPost("/api/v1/documents/async", async (
 .Accepts<GenerateDocumentHttpRequest>("application/json")
 .Produces<TaskStatusHttpResponse>(StatusCodes.Status202Accepted)
 .Produces(StatusCodes.Status400BadRequest)
-.Produces(StatusCodes.Status500InternalServerError);
+.Produces(StatusCodes.Status401Unauthorized)
+.Produces(StatusCodes.Status403Forbidden)
+.Produces(StatusCodes.Status500InternalServerError)
+    .MaybeRequireAuth(AuthorizationPolicies.DocumentSubmit, authOptions.Enabled);
 
 app.MapGet("/api/v1/tasks/{taskId}", async (
     string taskId,
@@ -164,7 +199,8 @@ app.MapGet("/api/v1/tasks/{taskId}", async (
 .WithSummary("Get the status of an asynchronous document generation task.")
 .WithDescription("Returns queued, processing, completed, or failed state along with download information when available.")
 .Produces<TaskStatusHttpResponse>(StatusCodes.Status200OK)
-.Produces(StatusCodes.Status404NotFound);
+.Produces(StatusCodes.Status404NotFound)
+    .MaybeRequireAuth(AuthorizationPolicies.DocumentRead, authOptions.Enabled);
 
 app.MapGet("/api/v1/tasks/{taskId}/download", async (
     string taskId,
@@ -187,7 +223,8 @@ app.MapGet("/api/v1/tasks/{taskId}/download", async (
 .WithSummary("Download the generated artifact for a completed task.")
 .WithDescription("Returns the generated file when the asynchronous task has completed and the artifact is available.")
 .Produces(StatusCodes.Status200OK)
-.Produces(StatusCodes.Status404NotFound);
+.Produces(StatusCodes.Status404NotFound)
+    .MaybeRequireAuth(AuthorizationPolicies.DocumentDownload, authOptions.Enabled);
 
 app.Run();
 

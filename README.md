@@ -79,6 +79,13 @@ The async flow now uses explicit message contracts and processing abstractions:
 - `DocumentGenerated`
 - `DocumentGenerationFailed`
 
+Background processing runs in a dedicated worker host:
+
+- `src/Host/GenerateDocService.Worker` — dedicated background processing service
+- Worker consumes `GenerateDocumentRequested` messages from the message bus
+- Worker shares the same Application and Infrastructure layers as the API
+- API and Worker can scale independently
+
 Current implementation uses an in-memory scheduler and artifact store, but the application layer is now shaped so MassTransit, Redis, and S3/MinIO can replace these implementations without changing the API contract or orchestration flow.
 
 Infrastructure now hosts MassTransit directly:
@@ -134,6 +141,44 @@ Run locally:
 ```powershell
 docker compose -f .\deploy\docker\docker-compose.yml up --build
 ```
+
+## Request validation
+
+API endpoints now enforce configurable guardrails to prevent resource abuse:
+
+- **Payload size**: default 10 MB
+- **Template size**: default 5 MB
+- **Metadata**: max 50 entries, key length 128, value length 1024
+- **Format/engine name lengths**: default 64 characters
+- **Request ID length**: default 64 characters
+
+Invalid requests return `400 Bad Request` with field-level error details.
+
+Configure limits via `DocumentProcessing:Validation` in `appsettings.json`.
+
+## Authentication and authorization
+
+API supports JWT bearer authentication with role-based authorization:
+
+- **Disabled by default** — local development requires no tokens
+- **Enable** by setting `DocumentProcessing:Authentication:Enabled = true`
+- **Roles**: `DocumentSubmit`, `DocumentRead`, `DocumentDownload`, `DocumentAdmin`
+- **Endpoint mapping**:
+  - `POST /documents/*` → `DocumentSubmit` or `DocumentAdmin`
+  - `GET /engines/*`, `GET /tasks/{taskId}` → `DocumentRead` or `DocumentAdmin`
+  - `GET /tasks/{taskId}/download` → `DocumentDownload` or `DocumentAdmin`
+
+Configure JWT settings via `DocumentProcessing:Authentication` (Issuer, Audience, SigningKey).
+
+## Artifact retention
+
+Stored artifacts and task records are automatically cleaned up by a background service:
+
+- **Completed tasks**: deleted after `RetentionDays` (default: 30 days)
+- **Failed tasks**: deleted after `FailedTaskRetentionDays` (default: 7 days)
+- **Cleanup interval**: runs every `CleanupIntervalHours` (default: 1 hour)
+
+Configure via `DocumentProcessing:Retention` in `appsettings.json`.
 
 ## API
 

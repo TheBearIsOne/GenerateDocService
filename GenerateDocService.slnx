@@ -11,6 +11,7 @@
   </Folder>
   <Folder Name="/src/Host/">
     <Project Path="src/Host/GenerateDocService.Api/GenerateDocService.Api.csproj" />
+    <Project Path="src/Host/GenerateDocService.Worker/GenerateDocService.Worker.csproj" />
   </Folder>
   <Folder Name="/src/Modules/" />
   <Folder Name="/src/Modules/DocumentProcessing/">

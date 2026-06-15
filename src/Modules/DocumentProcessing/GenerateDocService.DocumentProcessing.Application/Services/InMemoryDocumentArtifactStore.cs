@@ -32,4 +32,10 @@ public sealed class InMemoryDocumentArtifactStore : IDocumentArtifactStore
         _artifacts.TryGetValue(storagePath, out var artifact);
         return Task.FromResult(artifact);
     }
+
+    public Task DeleteAsync(string storagePath, CancellationToken cancellationToken = default)
+    {
+        _artifacts.TryRemove(storagePath, out _);
+        return Task.CompletedTask;
+    }
 }

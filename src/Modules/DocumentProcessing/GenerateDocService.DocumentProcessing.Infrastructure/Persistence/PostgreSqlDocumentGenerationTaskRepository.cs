@@ -37,4 +37,27 @@ public sealed class PostgreSqlDocumentGenerationTaskRepository : IDocumentGenera
         _dbContext.DocumentGenerationTasks.Update(task);
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task DeleteAsync(
+        string taskId,
+        CancellationToken cancellationToken = default)
+    {
+        var task = await _dbContext.DocumentGenerationTasks
+            .FirstOrDefaultAsync(e => e.TaskId == taskId, cancellationToken);
+
+        if (task is not null)
+        {
+            _dbContext.DocumentGenerationTasks.Remove(task);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task<IReadOnlyList<DocumentGenerationTask>> GetExpiredTasksAsync(
+        DateTimeOffset olderThan,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.DocumentGenerationTasks
+            .Where(e => e.UpdatedAtUtc.HasValue && e.UpdatedAtUtc.Value < olderThan)
+            .ToListAsync(cancellationToken);
+    }
 }

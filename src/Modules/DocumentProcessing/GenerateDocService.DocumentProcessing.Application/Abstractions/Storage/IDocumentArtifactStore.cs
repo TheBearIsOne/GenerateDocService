@@ -7,4 +7,6 @@ public interface IDocumentArtifactStore
     Task<DocumentArtifactReference> SaveAsync(GeneratedDocumentResult document, CancellationToken cancellationToken = default);
 
     Task<StoredDocumentArtifact?> GetAsync(string storagePath, CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(string storagePath, CancellationToken cancellationToken = default);
 }
