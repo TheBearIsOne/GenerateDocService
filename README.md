@@ -104,9 +104,12 @@ Artifact storage now returns a `DocumentArtifactReference` instead of a raw stri
 
 Infrastructure configuration now supports:
 
+- `DocumentProcessing:Persistence:Provider = InMemory | PostgreSql`
 - `DocumentProcessing:Caching:Provider = InMemory | Redis`
 - `DocumentProcessing:Messaging:Transport = InMemory | RabbitMQ`
 - `DocumentProcessing:Storage:Provider = InMemory | ObjectStorage`
+
+Task persistence now supports a PostgreSQL-backed EF Core repository for durable async task storage.
 
 Redis adapters for generated document cache, request deduplication, and compiled templates are implemented and can be enabled through configuration.
 

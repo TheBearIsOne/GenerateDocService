@@ -7,6 +7,10 @@ using GenerateDocService.DocumentProcessing.Infrastructure.Engines;
 using GenerateDocService.DocumentProcessing.Infrastructure.Caching;
 using GenerateDocService.DocumentProcessing.Infrastructure.Messaging;
 using GenerateDocService.DocumentProcessing.Infrastructure.Storage;
+using GenerateDocService.DocumentProcessing.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Npgsql;
 using GenerateDocService.Engine.Abstractions;
 using GenerateDocService.Engine.DotLiquid;
 using GenerateDocService.Engine.QuestPdf;
@@ -37,6 +41,7 @@ public static class ServiceCollectionExtensions
         services.AddDocumentProcessingCaching(configuration);
         services.AddDocumentProcessingStorage(configuration);
         services.AddDocumentProcessingMessaging(configuration);
+        services.AddDocumentProcessingPersistence(configuration);
         services.AddDocumentProcessingHealthChecks(configuration);
         return services;
     }
@@ -215,12 +220,45 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    private static IServiceCollection AddDocumentProcessingPersistence(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.Configure<DocumentProcessingPersistenceOptions>(
+            configuration.GetSection(DocumentProcessingPersistenceOptions.SectionName));
+
+        var persistenceOptions = configuration
+            .GetSection(DocumentProcessingPersistenceOptions.SectionName)
+            .Get<DocumentProcessingPersistenceOptions>()
+            ?? new DocumentProcessingPersistenceOptions();
+
+        if (!persistenceOptions.IsPostgreSqlProvider())
+        {
+            return services;
+        }
+
+        services.AddDbContext<DocumentGenerationDbContext>(options =>
+            options.UseNpgsql(persistenceOptions.PostgreSql.ConnectionString));
+
+        services.Replace(
+            ServiceDescriptor.Singleton<
+                Application.Abstractions.Persistence.IDocumentGenerationTaskRepository,
+                PostgreSqlDocumentGenerationTaskRepository>());
+
+        return services;
+    }
+
     private static IServiceCollection AddDocumentProcessingHealthChecks(this IServiceCollection services, IConfiguration configuration)
     {
         var cacheOptions = configuration
             .GetSection(DocumentProcessingCacheOptions.SectionName)
             .Get<DocumentProcessingCacheOptions>()
             ?? new DocumentProcessingCacheOptions();
+
+        var persistenceOptions = configuration
+            .GetSection(DocumentProcessingPersistenceOptions.SectionName)
+            .Get<DocumentProcessingPersistenceOptions>()
+            ?? new DocumentProcessingPersistenceOptions();
 
         var messagingOptions = configuration
             .GetSection(DocumentProcessingMessagingOptions.SectionName)
@@ -249,6 +287,23 @@ public static class ServiceCollectionExtensions
             healthChecks.AddCheck(
                 "cache-provider",
                 () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("In-memory cache provider configured."),
+                tags: ["live", "ready"]);
+        }
+
+        if (persistenceOptions.IsPostgreSqlProvider())
+        {
+            healthChecks.AddCheck(
+                "postgresql-persistence",
+                () => new HealthCheckResult(
+                    HealthStatus.Healthy,
+                    "PostgreSQL persistence configured."),
+                tags: ["ready"]);
+        }
+        else
+        {
+            healthChecks.AddCheck(
+                "task-persistence",
+                () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("In-memory task persistence configured."),
                 tags: ["live", "ready"]);
         }
 

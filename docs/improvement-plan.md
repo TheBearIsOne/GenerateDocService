@@ -304,7 +304,29 @@ The emphasis is on practical, staged improvements.
 
 ---
 
-## 9. Suggested phased roadmap
+## 9. Current project position
+
+As of 2026-06-14, the project is **before Phase 1**. All items in Section 10 are pending or in progress.
+
+**Already implemented (not from §10):**
+- Clean Architecture scaffold (Domain, Application, Infrastructure, Presentation, Host, Client)
+- 4 engine plugins (fake, scriban, dotliquid, questpdf)
+- Template parser registry and compiled template cache (in-memory + Redis)
+- MassTransit in-memory messaging with RabbitMQ transport option
+- Redis/RabbitMQ/MinIO infrastructure adapters
+- Health checks, correlation middleware, OpenTelemetry, Serilog
+- NBomber performance baselines (15 profiles) — documented in `docs/performance-baseline.md`
+- Unit + integration tests
+
+**Phase 1 tasks — pending:**
+- Durable task persistence (PostgreSQL/SQL Server via EF Core or Dapper)
+- Input validation and guardrails (payload size, template size, format limits)
+- Auth/authz (JWT bearer, role-based authorization)
+- Resilience policies (retry, timeout, circuit-breaker for Redis, RabbitMQ, MinIO)
+
+---
+
+## 10. Suggested phased roadmap
 
 ## Phase 1
 
@@ -335,10 +357,10 @@ The emphasis is on practical, staged improvements.
 
 ---
 
-## 10. Concrete immediate next tasks
+## 11. Concrete immediate next tasks
 
-1. Add `docs/performance-baseline.md` or extend performance docs with standard benchmark matrix.
-2. Implement durable task repository.
+1. ~~Add `docs/performance-baseline.md` or extend performance docs with standard benchmark matrix.~~ **DONE**
+2. ~~Implement durable task repository.~~ **DONE** — EF Core + PostgreSQL, provider switching via `DocumentProcessing:Persistence:Provider`
 3. Add request validation and payload/template size limits.
 4. Add authentication and authorization.
 5. Create a dedicated worker host.
@@ -347,7 +369,7 @@ The emphasis is on practical, staged improvements.
 
 ---
 
-## 11. Final recommendation
+## 12. Final recommendation
 
 Do not rewrite the solution.
 

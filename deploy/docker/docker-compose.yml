@@ -23,12 +23,15 @@ services:
       DocumentProcessing__Storage__ObjectStorage__SecretKey: minioadmin
       DocumentProcessing__Storage__ObjectStorage__UseSsl: 'false'
       DocumentProcessing__Storage__ObjectStorage__CreateBucketIfMissing: 'true'
+      DocumentProcessing__Persistence__Provider: PostgreSql
+      DocumentProcessing__Persistence__PostgreSql__ConnectionString: Host=postgres;Port=5432;Database=generatedocservice;Username=postgres;Password=postgres
     ports:
       - "8080:8080"
     depends_on:
       - rabbitmq
       - redis
       - minio
+      - postgres
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -50,3 +53,17 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: generatedocservice
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
