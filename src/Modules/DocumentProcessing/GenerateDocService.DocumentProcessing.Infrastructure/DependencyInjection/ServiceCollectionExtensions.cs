@@ -13,6 +13,9 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 using GenerateDocService.Engine.Abstractions;
 using GenerateDocService.Engine.DotLiquid;
+using GenerateDocService.Engine.MiniExcel;
+using GenerateDocService.Engine.MiniPdf;
+using GenerateDocService.Engine.MiniWord;
 using GenerateDocService.Engine.QuestPdf;
 using GenerateDocService.Engine.Scriban;
 using MassTransit;
@@ -37,7 +40,10 @@ public static class ServiceCollectionExtensions
             typeof(FakeDocumentGenerationEngine).Assembly,
             typeof(ScribanDocumentGenerationEngine).Assembly,
             typeof(QuestPdfDocumentGenerationEngine).Assembly,
-            typeof(DotLiquidDocumentGenerationEngine).Assembly);
+            typeof(DotLiquidDocumentGenerationEngine).Assembly,
+            typeof(MiniExcelDocumentGenerationEngine).Assembly,
+            typeof(MiniWordDocumentGenerationEngine).Assembly,
+            typeof(MiniPdfDocumentGenerationEngine).Assembly);
         services.AddDocumentProcessingCaching(configuration);
         services.AddDocumentProcessingStorage(configuration);
         services.AddDocumentProcessingMessaging(configuration);
@@ -188,6 +194,10 @@ public static class ServiceCollectionExtensions
         {
             busRegistrationConfigurator.AddConsumer<GenerateDocumentRequestedConsumer>();
 
+            // MassTransit v9+ requires a license. Set via MT_LICENSE env var or appsettings.
+            var license = Environment.GetEnvironmentVariable("MT_LICENSE")
+                ?? configuration["MassTransit:License"];
+
             if (messagingOptions.IsRabbitMqTransport())
             {
                 busRegistrationConfigurator.UsingRabbitMq((context, cfg) =>
@@ -202,6 +212,9 @@ public static class ServiceCollectionExtensions
                             hostConfigurator.Password(messagingOptions.RabbitMq.Password);
                         });
 
+                    if (!string.IsNullOrEmpty(license))
+                        cfg.SetLicense(license);
+
                     cfg.ConfigureEndpoints(context);
                 });
 
@@ -210,6 +223,9 @@ public static class ServiceCollectionExtensions
 
             busRegistrationConfigurator.UsingInMemory((context, cfg) =>
             {
+                if (!string.IsNullOrEmpty(license))
+                    cfg.SetLicense(license);
+
                 cfg.ConfigureEndpoints(context);
             });
         });

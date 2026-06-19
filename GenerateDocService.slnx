@@ -6,6 +6,9 @@
   <Folder Name="/src/Engines/">
     <Project Path="src/Engines/GenerateDocService.Engine.Abstractions/GenerateDocService.Engine.Abstractions.csproj" />
     <Project Path="src/Engines/GenerateDocService.Engine.DotLiquid/GenerateDocService.Engine.DotLiquid.csproj" />
+    <Project Path="src/Engines/GenerateDocService.Engine.MiniExcel/GenerateDocService.Engine.MiniExcel.csproj" />
+    <Project Path="src/Engines/GenerateDocService.Engine.MiniPdf/GenerateDocService.Engine.MiniPdf.csproj" />
+    <Project Path="src/Engines/GenerateDocService.Engine.MiniWord/GenerateDocService.Engine.MiniWord.csproj" />
     <Project Path="src/Engines/GenerateDocService.Engine.QuestPdf/GenerateDocService.Engine.QuestPdf.csproj" />
     <Project Path="src/Engines/GenerateDocService.Engine.Scriban/GenerateDocService.Engine.Scriban.csproj" />
   </Folder>

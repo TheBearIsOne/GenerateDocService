@@ -268,12 +268,18 @@ The emphasis is on practical, staged improvements.
 
 ### 7.4 More engines and converters
 
+**DONE**
+- Added `miniexcel` engine for JSON-to-XLSX (Excel) generation.
+- Added `miniword` engine for template-driven .docx generation using `{{tag}}` syntax.
+- Added `minipdf` engine for .docx/.xlsx-to-PDF conversion.
+- All engines use streaming approaches to minimize memory usage.
+- Registered priorities: miniword=100, miniexcel=150, minipdf=250.
+
 **Improve**
 - Add more formats and engines, for example:
-  - DOCX generation;
+  - DOCX generation without template (programmatic);
   - HTML to PDF alternative engine;
-  - image rendering;
-  - spreadsheet generation.
+  - image rendering.
 
 ---
 

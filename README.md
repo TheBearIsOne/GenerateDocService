@@ -67,7 +67,10 @@ Current engines:
 - `fake` for simple scaffolding and smoke flows;
 - `scriban` for template-driven text, markdown, html, and json generation from JSON payloads;
 - `dotliquid` for template-driven text, markdown, html, and json generation from JSON payloads;
-- `questpdf` for JSON-to-PDF generation.
+- `questpdf` for JSON-to-PDF generation;
+- `miniexcel` for JSON-to-XLSX (Excel) generation from JSON arrays or objects;
+- `miniword` for template-driven .docx generation from JSON payloads using `{{tag}}` syntax;
+- `minipdf` for .docx/.xlsx-to-PDF conversion (payload is base64-encoded source document).
 
 This keeps the current modular monolith ready for future extraction of engines into isolated modules or services.
 
