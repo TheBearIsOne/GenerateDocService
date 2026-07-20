@@ -1,0 +1,33 @@
+System.IO.InvalidDataException: Central Directory corrupt.
+ ---> System.IO.IOException: An attempt was made to move the position before the beginning of the stream.
+   at System.IO.MemoryStream.SeekCore(Int64 offset, Int32 loc)
+   at System.IO.Compression.ZipArchive.ReadEndOfCentralDirectory()
+   --- End of inner exception stack trace ---
+   at System.IO.Compression.ZipArchive.ReadEndOfCentralDirectory()
+   at System.IO.Compression.ZipArchive..ctor(Stream stream, ZipArchiveMode mode, Boolean leaveOpen, Encoding entryNameEncoding)
+   at MiniExcelLibs.Zip.MiniExcelZipArchive..ctor(Stream stream, ZipArchiveMode mode, Boolean leaveOpen, Encoding entryNameEncoding)
+   at MiniExcelLibs.Zip.ExcelOpenXmlZip..ctor(Stream fileStream, ZipArchiveMode mode, Boolean leaveOpen, Encoding entryNameEncoding, Boolean isUpdateMode)
+   at MiniExcelLibs.OpenXml.ExcelOpenXmlSheetReader..ctor(Stream stream, IConfiguration configuration, Boolean isUpdateMode)
+   at MiniExcelLibs.OpenXml.SaveByTemplate.ExcelOpenXmlTemplate.SaveAsByTemplate(Stream templateStream, Object value)
+   at MiniExcelLibs.MiniExcel.SaveAsByTemplate(Stream stream, Stream templateStream, Object value, IConfiguration configuration)
+   at GenerateDocService.Engine.MiniExcel.MiniExcelDocumentGenerationEngine.GenerateAsync(IReportRequest request, CancellationToken cancellationToken) in /src/src/Engines/GenerateDocService.Engine.MiniExcel/MiniExcelDocumentGenerationEngine.cs:line 39
+   at GenerateDocService.DocumentProcessing.Application.Services.SyncDocumentGenerationService.GenerateAsync(GenerateDocumentRequest request, CancellationToken cancellationToken) in /src/src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Application/Services/SyncDocumentGenerationService.cs:line 20
+   at Program.<>c.<<<Main>$>b__0_7>d.MoveNext() in /src/src/Host/GenerateDocService.Api/Program.cs:line 142
+--- End of stack trace from previous location ---
+   at Microsoft.AspNetCore.Http.RequestDelegateFactory.<TaskOfTToValueTaskOfObject>g__ExecuteAwaited|92_0[T](Task`1 task)
+   at GenerateDocService.Api.Validation.ValidationRequestFilter.InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next) in /src/src/Host/GenerateDocService.Api/Validation/ValidationRequestFilter.cs:line 36
+   at Microsoft.AspNetCore.Http.RequestDelegateFactory.<ExecuteValueTaskOfObject>g__ExecuteAwaited|130_0(ValueTask`1 valueTask, HttpContext httpContext, JsonTypeInfo`1 jsonTypeInfo)
+   at Microsoft.AspNetCore.Http.RequestDelegateFactory.<>c__DisplayClass102_2.<<HandleRequestBodyAndCompileRequestDelegateForJson>b__2>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Serilog.AspNetCore.RequestLoggingMiddleware.Invoke(HttpContext httpContext)
+   at GenerateDocService.Api.Correlation.CorrelationIdMiddleware.InvokeAsync(HttpContext context) in /src/src/Host/GenerateDocService.Api/Correlation/CorrelationIdMiddleware.cs:line 14
+   at Microsoft.AspNetCore.Authorization.AuthorizationMiddleware.Invoke(HttpContext context)
+   at Microsoft.AspNetCore.Diagnostics.DeveloperExceptionPageMiddlewareImpl.Invoke(HttpContext context)
+
+HEADERS
+=======
+Accept: */*
+Host: localhost:8080
+User-Agent: curl/8.21.0
+Content-Type: application/json
+Content-Length: 141

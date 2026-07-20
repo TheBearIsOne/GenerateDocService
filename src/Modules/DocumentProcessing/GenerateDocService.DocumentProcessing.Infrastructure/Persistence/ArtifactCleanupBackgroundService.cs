@@ -1,6 +1,7 @@
 using GenerateDocService.DocumentProcessing.Application.Abstractions.Persistence;
 using GenerateDocService.DocumentProcessing.Application.Abstractions.Storage;
 using GenerateDocService.DocumentProcessing.Domain.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -8,8 +9,7 @@ using Microsoft.Extensions.Options;
 namespace GenerateDocService.DocumentProcessing.Infrastructure.Persistence;
 
 public sealed class ArtifactCleanupBackgroundService(
-    IDocumentGenerationTaskRepository taskRepository,
-    IDocumentArtifactStore artifactStore,
+    IServiceScopeFactory scopeFactory,
     IOptions<ArtifactRetentionOptions> retentionOptions,
     ILogger<ArtifactCleanupBackgroundService> logger) : BackgroundService
 {
@@ -28,8 +28,12 @@ public sealed class ArtifactCleanupBackgroundService(
         {
             try
             {
-                var completedCount = await CleanupCompletedTasksAsync(options.RetentionDays, stoppingToken);
-                var failedCount = await CleanupFailedTasksAsync(options.FailedTaskRetentionDays, stoppingToken);
+                using var scope = scopeFactory.CreateScope();
+                var taskRepository = scope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>();
+                var artifactStore = scope.ServiceProvider.GetRequiredService<IDocumentArtifactStore>();
+
+                var completedCount = await CleanupCompletedTasksAsync(taskRepository, artifactStore, options.RetentionDays, stoppingToken);
+                var failedCount = await CleanupFailedTasksAsync(taskRepository, options.FailedTaskRetentionDays, stoppingToken);
 
                 if (completedCount > 0 || failedCount > 0)
                 {
@@ -48,7 +52,11 @@ public sealed class ArtifactCleanupBackgroundService(
         }
     }
 
-    private async Task<int> CleanupCompletedTasksAsync(int retentionDays, CancellationToken cancellationToken)
+    private async Task<int> CleanupCompletedTasksAsync(
+        IDocumentGenerationTaskRepository taskRepository,
+        IDocumentArtifactStore artifactStore,
+        int retentionDays,
+        CancellationToken cancellationToken)
     {
         var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays);
         var expiredTasks = await taskRepository.GetExpiredTasksAsync(cutoff, cancellationToken);
@@ -77,7 +85,10 @@ public sealed class ArtifactCleanupBackgroundService(
         return completedTasks.Count;
     }
 
-    private async Task<int> CleanupFailedTasksAsync(int failedRetentionDays, CancellationToken cancellationToken)
+    private async Task<int> CleanupFailedTasksAsync(
+        IDocumentGenerationTaskRepository taskRepository,
+        int failedRetentionDays,
+        CancellationToken cancellationToken)
     {
         var cutoff = DateTimeOffset.UtcNow.AddDays(-failedRetentionDays);
         var expiredTasks = await taskRepository.GetExpiredTasksAsync(cutoff, cancellationToken);

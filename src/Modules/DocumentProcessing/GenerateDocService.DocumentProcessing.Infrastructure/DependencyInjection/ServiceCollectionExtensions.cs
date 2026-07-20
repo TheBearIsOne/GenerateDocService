@@ -194,10 +194,6 @@ public static class ServiceCollectionExtensions
         {
             busRegistrationConfigurator.AddConsumer<GenerateDocumentRequestedConsumer>();
 
-            // MassTransit v9+ requires a license. Set via MT_LICENSE env var or appsettings.
-            var license = Environment.GetEnvironmentVariable("MT_LICENSE")
-                ?? configuration["MassTransit:License"];
-
             if (messagingOptions.IsRabbitMqTransport())
             {
                 busRegistrationConfigurator.UsingRabbitMq((context, cfg) =>
@@ -212,9 +208,6 @@ public static class ServiceCollectionExtensions
                             hostConfigurator.Password(messagingOptions.RabbitMq.Password);
                         });
 
-                    if (!string.IsNullOrEmpty(license))
-                        cfg.SetLicense(license);
-
                     cfg.ConfigureEndpoints(context);
                 });
 
@@ -223,9 +216,6 @@ public static class ServiceCollectionExtensions
 
             busRegistrationConfigurator.UsingInMemory((context, cfg) =>
             {
-                if (!string.IsNullOrEmpty(license))
-                    cfg.SetLicense(license);
-
                 cfg.ConfigureEndpoints(context);
             });
         });
@@ -259,10 +249,9 @@ public static class ServiceCollectionExtensions
         services.AddDbContext<DocumentGenerationDbContext>(options =>
             options.UseNpgsql(persistenceOptions.PostgreSql.ConnectionString));
 
-        services.Replace(
-            ServiceDescriptor.Singleton<
-                Application.Abstractions.Persistence.IDocumentGenerationTaskRepository,
-                PostgreSqlDocumentGenerationTaskRepository>());
+        services.AddScoped<
+            Application.Abstractions.Persistence.IDocumentGenerationTaskRepository,
+            PostgreSqlDocumentGenerationTaskRepository>();
 
         services.AddHostedService<ArtifactCleanupBackgroundService>();
 

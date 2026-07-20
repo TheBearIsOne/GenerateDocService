@@ -131,18 +131,99 @@ Local production-like dependencies are defined in:
 
 - `deploy/docker/docker-compose.yml`
 - `src/Host/GenerateDocService.Api/Dockerfile`
+- `src/Host/GenerateDocService.Worker/Dockerfile`
 
 The compose stack starts:
 
-- API
-- RabbitMQ
-- Redis
-- MinIO
+- **API** (`generatedocservice-api`) — HTTP endpoints on port 8080
+- **Worker** (`generatedocservice-worker`) — background processing
+- **RabbitMQ** — message broker (ports 5672, 15672 for management UI)
+- **Redis** — caching and deduplication (port 6379)
+- **MinIO** — object storage (ports 9000, 9001 for console)
+- **PostgreSQL** — durable task persistence (port 5432)
 
-Run locally:
+### Quick start with Docker
 
 ```powershell
+# Build and start all services
 docker compose -f .\deploy\docker\docker-compose.yml up --build
+
+# Or run in detached mode
+docker compose -f .\deploy\docker\docker-compose.yml up --build -d
+```
+
+### Access services
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| **API** | http://localhost:8080 | — |
+| **Swagger UI** | http://localhost:8080/swagger | — |
+| **OpenAPI JSON** | http://localhost:8080/openapi/v1.json | — |
+| **RabbitMQ Management** | http://localhost:15672 | guest / guest |
+| **MinIO Console** | http://localhost:9001 | minioadmin / minioadmin |
+| **PostgreSQL** | localhost:5432 | postgres / postgres |
+
+### Example API requests
+
+**List engines:**
+```powershell
+curl http://localhost:8080/api/v1/engines
+```
+
+**Generate document synchronously (MiniExcel):**
+```powershell
+curl -X POST http://localhost:8080/api/v1/documents/sync `
+  -H "Content-Type: application/json" `
+  -d '{
+    "engine": "miniexcel",
+    "inputFormat": "json",
+    "outputFormat": "xlsx",
+    "payload": "[{\"Name\": \"Alice\", \"Age\": 30}, {\"Name\": \"Bob\", \"Age\": 25}]"
+  }'
+```
+
+**Generate document asynchronously:**
+```powershell
+curl -X POST http://localhost:8080/api/v1/documents/async `
+  -H "Content-Type: application/json" `
+  -d '{
+    "engine": "scriban",
+    "inputFormat": "json",
+    "outputFormat": "txt",
+    "templateFormat": "scriban",
+    "payload": "{\"document\":\"hello\",\"customer\":{\"name\":\"Ada Lovelace\"}}",
+    "template": "Document: {{ document }} for {{ customer.name }}"
+  }'
+```
+
+**Check task status:**
+```powershell
+curl http://localhost:8080/api/v1/tasks/{taskId}
+```
+
+**Download generated document:**
+```powershell
+curl http://localhost:8080/api/v1/tasks/{taskId}/download --output document.xlsx
+```
+
+### Stop services
+
+```powershell
+# Stop all services
+docker compose -f .\deploy\docker\docker-compose.yml down
+
+# Stop and remove volumes (including PostgreSQL data)
+docker compose -f .\deploy\docker\docker-compose.yml down -v
+```
+
+### View logs
+
+```powershell
+# All services
+docker compose -f .\deploy\docker\docker-compose.yml logs -f
+
+# Specific service
+docker compose -f .\deploy\docker\docker-compose.yml logs -f generatedocservice-api
 ```
 
 ## Request validation

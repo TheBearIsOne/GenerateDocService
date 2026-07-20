@@ -11,16 +11,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<GenerateDocService.Engine.Abstractions.ICompiledTemplateCache, Services.InMemoryCompiledTemplateCache>();
         services.AddSingleton<Abstractions.Caching.IGeneratedDocumentCache, Services.InMemoryGeneratedDocumentCache>();
         services.AddSingleton<Abstractions.Caching.IGenerationRequestDeduplicationStore, Services.InMemoryGenerationRequestDeduplicationStore>();
-        services.AddSingleton<Abstractions.Persistence.IDocumentGenerationTaskRepository, Services.InMemoryDocumentGenerationTaskRepository>();
+        services.AddScoped<Abstractions.Persistence.IDocumentGenerationTaskRepository, Services.InMemoryDocumentGenerationTaskRepository>();
         services.AddSingleton<Abstractions.Storage.IDocumentArtifactStore, Services.InMemoryDocumentArtifactStore>();
         services.AddSingleton<Abstractions.Messaging.IDocumentGenerationEventPublisher, Services.NullDocumentGenerationEventPublisher>();
-        services.AddSingleton<Abstractions.Messaging.IBackgroundDocumentGenerationProcessor, Services.BackgroundDocumentGenerationProcessor>();
+        services.AddScoped<Abstractions.Messaging.IBackgroundDocumentGenerationProcessor, Services.BackgroundDocumentGenerationProcessor>();
         services.AddSingleton<Abstractions.Messaging.IBackgroundGenerationScheduler, Services.InMemoryBackgroundGenerationScheduler>();
         services.AddSingleton<Services.DocumentGenerationMetrics>();
-        services.AddSingleton<Services.SyncDocumentGenerationService>();
-        services.AddSingleton<Services.AsyncDocumentGenerationService>();
-        services.AddSingleton<Services.TaskStatusQueryService>();
-        services.AddSingleton<Services.DocumentArtifactDownloadService>();
+        services.AddScoped<Services.SyncDocumentGenerationService>();
+        services.AddScoped<Services.AsyncDocumentGenerationService>();
+        services.AddScoped<Services.TaskStatusQueryService>();
+        services.AddScoped<Services.DocumentArtifactDownloadService>();
 
         return services;
     }
