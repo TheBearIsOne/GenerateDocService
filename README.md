@@ -157,7 +157,7 @@ docker compose -f .\deploy\docker\docker-compose.yml up --build -d
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | **API** | http://localhost:8080 | — |
-| **Swagger UI** | http://localhost:8080/swagger | — |
+| **Scalar API Reference** | http://localhost:8080/scalar/v1 | — |
 | **OpenAPI JSON** | http://localhost:8080/openapi/v1.json | — |
 | **RabbitMQ Management** | http://localhost:15672 | guest / guest |
 | **MinIO Console** | http://localhost:9001 | minioadmin / minioadmin |

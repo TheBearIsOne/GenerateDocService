@@ -25,3 +25,10 @@
 - Prefer solution design and implementation in C#/.NET using Clean Architecture and Modular Monolith principles.
 - Adhere to SOLID principles, Clean Code, DRY, KISS, and YAGNI methodologies.
 - Utilize design patterns such as Strategy, Factory, Mediator, and Plugin for a high-load document generation service.
+
+<!-- mermaid-ai-skills:start -->
+## Mermaid Diagrams
+
+When the user asks to create, edit, or visualize a diagram, follow the
+instructions in `.github/instructions/mermaid.instructions.md`.
+<!-- mermaid-ai-skills:end -->
