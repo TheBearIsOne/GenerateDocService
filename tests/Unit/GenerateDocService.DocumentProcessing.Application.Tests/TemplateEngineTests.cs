@@ -42,6 +42,8 @@ public sealed class TemplateEngineTests
 
         var content = Encoding.UTF8.GetString(result.Content.ReadFully());
         content.Should().Be("Hello Alice! You are 30 years old and live in Moscow.");
+        var outputPath = await TestArtifactWriter.WriteAsync("scriban/scriban-generated.txt", Encoding.UTF8.GetBytes(content));
+        File.Exists(outputPath).Should().BeTrue();
 
         if (result is IDisposable d1) d1.Dispose();
     }
@@ -169,6 +171,8 @@ public sealed class TemplateEngineTests
 
         var content = Encoding.UTF8.GetString(result.Content.ReadFully());
         content.Should().Be("Hello Alice! You are 30 years old and live in Moscow.");
+        var outputPath = await TestArtifactWriter.WriteAsync("dotliquid/dotliquid-generated.txt", Encoding.UTF8.GetBytes(content));
+        File.Exists(outputPath).Should().BeTrue();
     }
 
     [Fact]
@@ -294,11 +298,17 @@ public sealed class TemplateEngineTests
 
         // Verify it's a valid ZIP/XLSX file
         var content = result.Content;
+        var documentBytes = content.ReadFully();
+        var outputPath = await TestArtifactWriter.WriteAsync("miniword/miniword-generated.docx", documentBytes);
         var header = new byte[2];
-        var bytesRead = content.Read(header, 0, 2);
-        bytesRead.Should().Be(2);
+        Array.Copy(documentBytes, header, header.Length);
         header[0].Should().Be(0x50); // 'P'
         header[1].Should().Be(0x4B); // 'K'
+        var documentXml = ReadDocxDocumentXml(documentBytes);
+        documentXml.Should().Contain("Alice lives in Moscow.");
+        documentXml.Should().NotContain("{{Name}}");
+        documentXml.Should().NotContain("{{City}}");
+        File.Exists(outputPath).Should().BeTrue();
     }
 
     [Fact]
@@ -332,10 +342,16 @@ public sealed class TemplateEngineTests
 
         // Verify valid ZIP signature
         var content = result.Content;
+        var documentBytes = content.ReadFully();
         var header = new byte[2];
-        content.Read(header, 0, 2);
+        Array.Copy(documentBytes, header, header.Length);
         header[0].Should().Be(0x50);
         header[1].Should().Be(0x4B);
+        var documentXml = ReadDocxDocumentXml(documentBytes);
+        documentXml.Should().Contain("Student: Bob, Score: 95, Grade: A");
+        documentXml.Should().NotContain("{{Name}}");
+        documentXml.Should().NotContain("{{Score}}");
+        documentXml.Should().NotContain("{{Grade}}");
     }
 
     [Fact]
@@ -345,7 +361,6 @@ public sealed class TemplateEngineTests
         var engine = new MiniWordDocumentGenerationEngine();
         var payload = """{"Name": "Alice"}""";
 
-        // Passing null template → becomes empty ReadOnlyMemory<byte> → MiniWord fails
         var request = new GenerateDocumentRequest(
             requestId: "miniword-test-3",
             engine: "miniword",
@@ -356,9 +371,7 @@ public sealed class TemplateEngineTests
             template: null,
             metadata: new Dictionary<string, string>());
 
-        // Act & Assert
-        // MiniWord receives empty byte[] and throws NullReferenceException internally
-        await Assert.ThrowsAsync<NullReferenceException>(
+        await Assert.ThrowsAsync<InvalidOperationException>(
             () => engine.GenerateAsync(request));
     }
 
@@ -433,6 +446,14 @@ public sealed class TemplateEngineTests
     {
         var textContent = "Student: {{Name}}, Score: {{Score}}, Grade: {{Grade}}";
         return CreateMinimalDocxTemplate(textContent);
+    }
+
+    private static string ReadDocxDocumentXml(byte[] documentBytes)
+    {
+        using var stream = new MemoryStream(documentBytes, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open());
+        return reader.ReadToEnd();
     }
 
     #endregion

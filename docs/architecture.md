@@ -48,11 +48,17 @@ This is already beyond a scaffold: the repository is a working service foundatio
   - DotLiquid document engine and template parser;
 - `src/Engines/GenerateDocService.Engine.QuestPdf`
   - JSON-to-PDF engine.
+- `src/Engines/GenerateDocService.Engine.Fop`
+  - HTTP adapter for FO/XSL-FO-to-PDF conversion through the external FOP Converter API.
 
 ## 2.4 Tests
 
 - `tests/Unit/GenerateDocService.DocumentProcessing.Application.Tests`
+  - retains inspectable output from every in-process engine in `artifacts/test-results/<engine>/` for local inspection;
+  - constructs TXT, HTML, Markdown, XLSX, and DOCX templates with JSON fixture data; XLSX and DOCX tests inspect Open XML parts to confirm populated values and remove placeholder tokens;
+  - normalizes prefixed SpreadsheetML produced by MiniExcel before MiniPdf conversion so worksheet values are rendered;
 - `tests/Integration/GenerateDocService.Api.IntegrationTests`
+  - runs an opt-in Scriban XSL-FO/XML template-to-FOP converter test when `FOP_CONVERTER_BASE_URL` is configured and writes its PDF to `artifacts/test-results/fop/`;
 - `tests/Performance/GenerateDocService.LoadTests.NBomber`
 
 ---
@@ -92,6 +98,7 @@ Contains technical adapters and provider switching:
 - MassTransit bus integration;
 - health checks;
 - assembly scanning for engines and template parsers.
+- configured `HttpClient` registration for the external FOP converter.
 
 #### Presentation
 Contains API contracts and mapping logic.
@@ -136,6 +143,7 @@ Based on current code:
 - `scriban`: priority 100
 - `dotliquid`: priority 90
 - `questpdf`: own PDF capability
+- `fop`: priority 300 for FO/XSL-FO-to-PDF conversion through the external converter
 - `fake`: smoke and fallback/testing scenarios
 
 This makes engine routing deterministic and extensible.

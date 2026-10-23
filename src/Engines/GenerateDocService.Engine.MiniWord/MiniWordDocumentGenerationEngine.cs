@@ -18,8 +18,7 @@ public sealed class MiniWordDocumentGenerationEngine : IDocumentGenerationEngine
     public bool CanHandle(string inputFormat, string outputFormat, string? templateFormat = null)
         => string.Equals(inputFormat, "json", StringComparison.OrdinalIgnoreCase)
            && string.Equals(outputFormat, "docx", StringComparison.OrdinalIgnoreCase)
-           && (string.IsNullOrWhiteSpace(templateFormat)
-               || string.Equals(templateFormat, "miniword", StringComparison.OrdinalIgnoreCase)
+           && (string.Equals(templateFormat, "miniword", StringComparison.OrdinalIgnoreCase)
                || string.Equals(templateFormat, "docx", StringComparison.OrdinalIgnoreCase));
 
     public Task<IReportResult> GenerateAsync(IReportRequest request, CancellationToken cancellationToken = default)
@@ -31,8 +30,12 @@ public sealed class MiniWordDocumentGenerationEngine : IDocumentGenerationEngine
             throw new InvalidOperationException($"Engine '{Name}' cannot handle {request.InputFormat} -> {request.OutputFormat}.");
         }
 
-        var templateBytes = request.Template?.ToArray()
-            ?? throw new InvalidOperationException($"Engine '{Name}' requires a .docx template.");
+        if (request.Template is not { } template || template.IsEmpty)
+        {
+            throw new InvalidOperationException($"Engine '{Name}' requires a non-empty .docx template.");
+        }
+
+        var templateBytes = template.ToArray();
 
         var valueDictionary = ParseJsonPayload(request);
 

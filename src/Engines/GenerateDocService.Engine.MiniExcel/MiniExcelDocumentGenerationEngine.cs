@@ -10,7 +10,7 @@ namespace GenerateDocService.Engine.MiniExcel;
     "miniexcel",
     InputFormats = ["json"],
     OutputFormats = ["xlsx"],
-    TemplateFormats = ["Excell"],
+    TemplateFormats = ["xlsx"],
     Priority = 150)]
 public sealed class MiniExcelDocumentGenerationEngine : IDocumentGenerationEngine
 {
@@ -18,7 +18,9 @@ public sealed class MiniExcelDocumentGenerationEngine : IDocumentGenerationEngin
 
     public bool CanHandle(string inputFormat, string outputFormat, string? templateFormat = null)
         => string.Equals(inputFormat, "json", StringComparison.OrdinalIgnoreCase)
-           && string.Equals(outputFormat, "xlsx", StringComparison.OrdinalIgnoreCase);
+           && string.Equals(outputFormat, "xlsx", StringComparison.OrdinalIgnoreCase)
+           && (string.IsNullOrWhiteSpace(templateFormat)
+               || string.Equals(templateFormat, "xlsx", StringComparison.OrdinalIgnoreCase));
 
     public Task<IReportResult> GenerateAsync(IReportRequest request, CancellationToken cancellationToken = default)
     {
@@ -30,16 +32,19 @@ public sealed class MiniExcelDocumentGenerationEngine : IDocumentGenerationEngin
         }
 
         var payloadText = Encoding.UTF8.GetString(request.Payload.Span);
-        var values = ParseJsonPayload(payloadText);
         using var stream = new MemoryStream();
-        
-        if(request.Template != null)
+
+        if (request.Template is { } template && !template.IsEmpty)
         {
-            using var templateStream = new MemoryStream(request.Template.Value.ToArray(), writable: false);
-            MiniExcelLibs.MiniExcel.SaveAsByTemplate(stream,templateStream,values);
+            var templateValues = ParseTemplateValues(payloadText);
+            using var templateStream = new MemoryStream(template.ToArray(), writable: false);
+            MiniExcelLibs.MiniExcel.SaveAsByTemplate(stream, templateStream, templateValues);
         }
         else
+        {
+            var values = ParseJsonPayload(payloadText);
             MiniExcelLibs.MiniExcel.SaveAs(stream, values);
+        }
 
         // Reset position to get the full content
         stream.Position = 0;
@@ -83,6 +88,18 @@ public sealed class MiniExcelDocumentGenerationEngine : IDocumentGenerationEngin
         }
 
         throw new InvalidOperationException("JSON payload must be an array of objects or a single object.");
+    }
+
+    private static Dictionary<string, object> ParseTemplateValues(string payloadText)
+    {
+        using var document = JsonDocument.Parse(payloadText);
+
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("MiniExcel templates require a JSON object as payload.");
+        }
+
+        return JsonElementToDictionary(document.RootElement);
     }
 
     private static Dictionary<string, object> JsonElementToDictionary(JsonElement element)

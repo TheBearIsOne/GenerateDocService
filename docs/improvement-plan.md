@@ -81,7 +81,7 @@ The emphasis is on practical, staged improvements.
 ### 3.4 Resilience policies for external dependencies
 
 **Current state**
-- Redis, RabbitMQ, and MinIO are configurable, but retry/circuit behavior is implicit.
+- Redis, RabbitMQ, MinIO, and the external FOP converter are configurable, but retry/circuit behavior is implicit.
 
 **Improve**
 - Add explicit resilience around external infrastructure.
@@ -216,6 +216,13 @@ The emphasis is on practical, staged improvements.
 
 ### 6.2 Add contract tests for engines
 
+**Current state**
+- In-process engine tests generate inspectable text, XLSX, DOCX, and PDF output in `artifacts/test-results/<engine>/`.
+- Text templates cover TXT, HTML, and Markdown; XLSX and DOCX template fixtures verify that JSON values replace their placeholders in Open XML output.
+- The MiniPdf test asserts rendered XLSX cell values, including a MiniExcel-generated workbook.
+- The FOP adapter has an isolated HTTP contract test; its real PDF output still requires a running external converter.
+- An opt-in integration test uses `FOP_CONVERTER_BASE_URL` to render a Scriban XSL-FO/XML template with data and generate a real PDF artifact from the external converter.
+
 **Improve**
 - Create a reusable conformance suite that every engine must pass.
 
@@ -272,6 +279,7 @@ The emphasis is on practical, staged improvements.
 - Added `miniexcel` engine for JSON-to-XLSX (Excel) generation.
 - Added `miniword` engine for template-driven .docx generation using `{{tag}}` syntax.
 - Added `minipdf` engine for .docx/.xlsx-to-PDF conversion.
+- Added `fop` engine for FO/XSL-FO-to-PDF conversion through the external FOP Converter API.
 - All engines use streaming approaches to minimize memory usage.
 - Registered priorities: miniword=100, miniexcel=150, minipdf=250.
 
@@ -280,6 +288,8 @@ The emphasis is on practical, staged improvements.
   - DOCX generation without template (programmatic);
   - HTML to PDF alternative engine;
   - image rendering.
+
+  The FOP adapter currently uses synchronous HTTP conversion. Add timeout, retry, and circuit-breaker policies before treating the external converter as a production dependency.
 
 ---
 

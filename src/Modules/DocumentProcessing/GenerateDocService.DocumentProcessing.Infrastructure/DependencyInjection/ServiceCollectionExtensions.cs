@@ -13,6 +13,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 using GenerateDocService.Engine.Abstractions;
 using GenerateDocService.Engine.DotLiquid;
+using GenerateDocService.Engine.Fop;
 using GenerateDocService.Engine.MiniExcel;
 using GenerateDocService.Engine.MiniPdf;
 using GenerateDocService.Engine.MiniWord;
@@ -33,6 +34,13 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddDocumentProcessingInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddDocumentProcessingApplication();
+        var fopBaseUrl = configuration["DocumentProcessing:Fop:BaseUrl"] ?? "http://localhost:8080/";
+        if (!Uri.TryCreate(fopBaseUrl, UriKind.Absolute, out var fopBaseUri))
+        {
+            throw new InvalidOperationException("DocumentProcessing:Fop:BaseUrl must be an absolute URI.");
+        }
+
+        services.AddHttpClient(FopDocumentGenerationEngine.HttpClientName, client => client.BaseAddress = fopBaseUri);
         services.AddTemplateParsers(
             typeof(ScribanTemplateParser).Assembly,
             typeof(DotLiquidTemplateParser).Assembly);
@@ -43,7 +51,8 @@ public static class ServiceCollectionExtensions
             typeof(DotLiquidDocumentGenerationEngine).Assembly,
             typeof(MiniExcelDocumentGenerationEngine).Assembly,
             typeof(MiniWordDocumentGenerationEngine).Assembly,
-            typeof(MiniPdfDocumentGenerationEngine).Assembly);
+            typeof(MiniPdfDocumentGenerationEngine).Assembly,
+            typeof(FopDocumentGenerationEngine).Assembly);
         services.AddDocumentProcessingCaching(configuration);
         services.AddDocumentProcessingStorage(configuration);
         services.AddDocumentProcessingMessaging(configuration);
@@ -107,7 +116,18 @@ public static class ServiceCollectionExtensions
 
         foreach (var engineType in engineTypes)
         {
-            services.AddSingleton(engineType);
+            if (engineType == typeof(FopDocumentGenerationEngine))
+            {
+                services.AddSingleton(engineType, serviceProvider =>
+                    new FopDocumentGenerationEngine(
+                        serviceProvider.GetRequiredService<IHttpClientFactory>()
+                            .CreateClient(FopDocumentGenerationEngine.HttpClientName)));
+            }
+            else
+            {
+                services.AddSingleton(engineType);
+            }
+
             services.AddSingleton(typeof(IDocumentGenerationEngine), serviceProvider =>
                 (IDocumentGenerationEngine)serviceProvider.GetRequiredService(engineType));
         }

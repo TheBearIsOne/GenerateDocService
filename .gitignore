@@ -35,6 +35,9 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
+# Generated artifacts retained by unit tests for local inspection
+/artifacts/test-results/
+
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
 

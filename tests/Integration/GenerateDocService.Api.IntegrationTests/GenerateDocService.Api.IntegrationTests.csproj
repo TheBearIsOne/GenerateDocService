@@ -22,6 +22,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Host\GenerateDocService.Api\GenerateDocService.Api.csproj" />
     <ProjectReference Include="..\..\..\src\Modules\DocumentProcessing\GenerateDocService.DocumentProcessing.Presentation\GenerateDocService.DocumentProcessing.Presentation.csproj" />
+    <ProjectReference Include="..\..\..\src\Modules\DocumentProcessing\GenerateDocService.DocumentProcessing.Application\GenerateDocService.DocumentProcessing.Application.csproj" />
+    <ProjectReference Include="..\..\..\src\Engines\GenerateDocService.Engine.Fop\GenerateDocService.Engine.Fop.csproj" />
+    <ProjectReference Include="..\..\..\src\Engines\GenerateDocService.Engine.Scriban\GenerateDocService.Engine.Scriban.csproj" />
   </ItemGroup>
 
 </Project>

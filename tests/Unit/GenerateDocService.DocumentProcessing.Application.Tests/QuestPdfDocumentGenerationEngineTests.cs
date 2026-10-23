@@ -35,6 +35,11 @@ public sealed class QuestPdfDocumentGenerationEngineTests
         Encoding.ASCII.GetString(bytes.Take(4).ToArray()).Should().Be("%PDF");
         result.ContentType.Should().Be("application/pdf");
         result.OutputFormat.Should().Be("pdf");
+
+        var outputPath = await TestArtifactWriter.WriteAsync("questpdf/questpdf-generated.pdf", bytes);
+
+        File.Exists(outputPath).Should().BeTrue();
+        new FileInfo(outputPath).Length.Should().Be(bytes.LongLength);
     }
 
     [Fact]

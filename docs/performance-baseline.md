@@ -50,6 +50,10 @@ dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- h
 dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_questpdf async_scriban_explicit
 ```
 
+`sync_questpdf` measures the in-process PDF engine. The FOP adapter is an external HTTP dependency and does not yet have an NBomber profile; establish its own baseline only after the converter host, payload size, and network placement are fixed.
+
+For manual correctness inspection, the unit suite saves outputs from every in-process engine under `artifacts/test-results/<engine>/`, including populated TXT, HTML, Markdown, XLSX, DOCX, and PDF artifacts. The XLSX and DOCX template checks inspect the resulting Open XML to verify data binding. Set `FOP_CONVERTER_BASE_URL` and run the FOP integration test to render a populated Scriban XSL-FO/XML template and add `artifacts/test-results/fop/fop-template-generated.pdf`. These files are test artifacts, not performance reports, and are ignored by Git.
+
 ### Explicit vs Auto-Selection
 ```powershell
 dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_explicit async_scriban_auto

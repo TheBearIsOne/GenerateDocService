@@ -11,6 +11,7 @@ Current first iteration includes:
 - first real engine module based on Scriban templates;
 - second template engine based on DotLiquid;
 - QuestPDF PDF generation engine scaffold;
+- Apache FOP-compatible XSL-FO-to-PDF conversion through an external HTTP service;
 - template parser registry for pluggable template providers;
 - in-memory compiled template cache foundation for template parsers;
 - Redis-backed compiled template cache support;
@@ -43,6 +44,7 @@ Current first iteration includes:
 - `src/Engines/GenerateDocService.Engine.Scriban`
 - `src/Engines/GenerateDocService.Engine.DotLiquid`
 - `src/Engines/GenerateDocService.Engine.QuestPdf`
+- `src/Engines/GenerateDocService.Engine.Fop`
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Domain`
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Application`
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Infrastructure`
@@ -71,6 +73,7 @@ Current engines:
 - `miniexcel` for JSON-to-XLSX (Excel) generation from JSON arrays or objects;
 - `miniword` for template-driven .docx generation from JSON payloads using `{{tag}}` syntax;
 - `minipdf` for .docx/.xlsx-to-PDF conversion (payload is base64-encoded source document).
+- `fop` for FO/XSL-FO-to-PDF conversion through the external FOP Converter API.
 
 This keeps the current modular monolith ready for future extraction of engines into isolated modules or services.
 
@@ -124,6 +127,8 @@ Task persistence now supports a PostgreSQL-backed EF Core repository for durable
 Redis adapters for generated document cache, request deduplication, and compiled templates are implemented and can be enabled through configuration.
 
 Object storage support now includes a MinIO implementation of `IDocumentArtifactStore`.
+
+The FOP adapter calls `POST /api/v1/convert/sync` on the FOP Converter API with a multipart `primaryDocument` part. Configure its base URL with `DocumentProcessing:Fop:BaseUrl`; it defaults to `http://localhost:8080/` and its OpenAPI document is available at `/v3/api-docs`. Run the converter on a different host or port when the GenerateDocService API itself is mapped to port 8080.
 
 ## Local infrastructure
 
@@ -180,6 +185,18 @@ curl -X POST http://localhost:8080/api/v1/documents/sync `
     "outputFormat": "xlsx",
     "payload": "[{\"Name\": \"Alice\", \"Age\": 30}, {\"Name\": \"Bob\", \"Age\": 25}]"
   }'
+```
+
+**Generate document synchronously (FOP):**
+```powershell
+curl -X POST http://localhost:8080/api/v1/documents/sync `
+  -H "Content-Type: application/json" `
+  -d '{
+    "engine": "fop",
+    "inputFormat": "xsl-fo",
+    "outputFormat": "pdf",
+    "payload": "<fo:root xmlns:fo=\"http://www.w3.org/1999/XSL/Format\"><fo:layout-master-set><fo:simple-page-master master-name=\"default\" page-height=\"11in\" page-width=\"8.5in\"><fo:region-body/></fo:simple-page-master></fo:layout-master-set><fo:page-sequence master-reference=\"default\"><fo:flow flow-name=\"xsl-region-body\"><fo:block>Hello from FOP</fo:block></fo:flow></fo:page-sequence></fo:root>"
+  }' --output document.pdf
 ```
 
 **Generate document asynchronously:**
@@ -360,6 +377,20 @@ Unit tests cover:
 - artifact download service;
 - custom metrics helpers.
 
+Successful engine tests retain inspectable output in `artifacts/test-results/<engine>/`:
+
+- `scriban` and `dotliquid` render JSON data into TXT, HTML, and Markdown templates; `fake` writes smoke-test text output;
+- `miniexcel` populates an XLSX template and `miniword` populates DOCX placeholders; tests inspect the generated workbook/document XML to ensure values are rendered and template tokens are absent;
+- `questpdf` and `minipdf` write PDFs. The MiniPdf test confirms spreadsheet values are rendered, including XLSX files produced by MiniExcel.
+- `fop` renders a Scriban XSL-FO/XML template before its opt-in integration test submits the populated FO to the external converter and writes `fop-template-generated.pdf`.
+
+The folder is ignored by Git and refreshed by the test suite. FOP also has a mock HTTP contract test. To generate its real artifact with a local converter:
+
+```powershell
+$env:FOP_CONVERTER_BASE_URL = "http://localhost:8080/"
+dotnet test tests/Integration/GenerateDocService.Api.IntegrationTests/GenerateDocService.Api.IntegrationTests.csproj --filter "FullyQualifiedName~FopDocumentGenerationEngineIntegrationTests"
+```
+
 Integration tests currently cover:
 
 - engine discovery endpoint;
@@ -492,3 +523,4 @@ Repository guidance for Copilot is stored in:
 - `.github/skills/api-service/SKILL.md`
 - `.github/skills/senior-architect/SKILL.md`
 - `.github/skills/csharp-developer/SKILL.md`
+<!--  -->
