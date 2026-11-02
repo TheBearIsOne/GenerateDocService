@@ -9,6 +9,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
+      DocumentProcessing__Authentication__Enabled: 'true'
+      DocumentProcessing__Authentication__SigningKey: ${GDS_AUTH_SIGNING_KEY:?GDS_AUTH_SIGNING_KEY must be set to a secret of at least 32 characters}
       DocumentProcessing__Caching__Provider: Redis
       DocumentProcessing__Caching__Redis__ConnectionString: redis:6379
       DocumentProcessing__Messaging__Transport: RabbitMQ
@@ -26,7 +28,8 @@ services:
       DocumentProcessing__Persistence__Provider: PostgreSql
       DocumentProcessing__Persistence__PostgreSql__ConnectionString: Host=postgres;Port=5432;Database=generatedocservice;Username=postgres;Password=postgres
     ports:
-      - "8080:8080"
+      # Host port 8081 avoids clashing with the fopconverter stack on 8080.
+      - "8081:8080"
     depends_on:
       - rabbitmq
       - redis
@@ -64,13 +67,15 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
 
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      # Host port 6380 avoids clashing with the fopconverter Redis on 6379.
+      # Containers still reach it as redis:6379 over the compose network.
+      - "127.0.0.1:6380:6379"
 
   minio:
     image: minio/minio:latest
@@ -79,8 +84,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
 
   postgres:
     image: postgres:17
@@ -89,7 +94,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: generatedocservice
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

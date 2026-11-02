@@ -30,6 +30,21 @@ public static class AuthenticationExtensions
             return services;
         }
 
+        if (string.IsNullOrWhiteSpace(authOptions.SigningKey))
+        {
+            throw new InvalidOperationException(
+                "Authentication is enabled but no JWT signing key is configured. " +
+                $"Set '{AuthenticationOptions.SectionName}:SigningKey' or the GDS_AUTH_SIGNING_KEY environment variable.");
+        }
+
+        if (authOptions.SigningKey.Length < AuthenticationOptions.MinimumSigningKeyLength)
+        {
+            throw new InvalidOperationException(
+                $"The JWT signing key must be at least {AuthenticationOptions.MinimumSigningKeyLength} characters " +
+                $"for HS256, but was {authOptions.SigningKey.Length}. " +
+                $"Update '{AuthenticationOptions.SectionName}:SigningKey' or the GDS_AUTH_SIGNING_KEY environment variable.");
+        }
+
         var signingKey = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(authOptions.SigningKey));
 

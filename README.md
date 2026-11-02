@@ -128,7 +128,7 @@ Redis adapters for generated document cache, request deduplication, and compiled
 
 Object storage support now includes a MinIO implementation of `IDocumentArtifactStore`.
 
-The FOP adapter calls `POST /api/v1/convert/sync` on the FOP Converter API with a multipart `primaryDocument` part. Configure its base URL with `DocumentProcessing:Fop:BaseUrl`; it defaults to `http://localhost:8080/` and its OpenAPI document is available at `/v3/api-docs`. Run the converter on a different host or port when the GenerateDocService API itself is mapped to port 8080.
+The FOP adapter calls `POST /api/v1/convert/sync` on the FOP Converter API with a multipart `primaryDocument` part. Configure its base URL with `DocumentProcessing:Fop:BaseUrl`; it defaults to `http://localhost:8080/` and its OpenAPI document is available at `/v3/api-docs`. The converter is a separate stack, not part of `docker-compose.yml`. Note that this default only resolves when calling from the host: inside the API container `localhost:8080` is the container itself, so set `DocumentProcessing__Fop__BaseUrl` to a network-reachable address for containerized runs.
 
 ## Local infrastructure
 
@@ -140,20 +140,35 @@ Local production-like dependencies are defined in:
 
 The compose stack starts:
 
-- **API** (`generatedocservice-api`) — HTTP endpoints on port 8080
-- **Worker** (`generatedocservice-worker`) — background processing
-- **RabbitMQ** — message broker (ports 5672, 15672 for management UI)
-- **Redis** — caching and deduplication (port 6379)
-- **MinIO** — object storage (ports 9000, 9001 for console)
-- **PostgreSQL** — durable task persistence (port 5432)
+- **API** (`generatedocservice-api`) — HTTP endpoints on host port **8081** (container port 8080), the only service published on all interfaces
+- **Worker** (`generatedocservice-worker`) — background processing, no published ports
+- **RabbitMQ** — message broker (5672, 15672 management UI)
+- **Redis** — caching and deduplication (host port **6380**, container port 6379)
+- **MinIO** — object storage (9000, 9001 console)
+- **PostgreSQL** — durable task persistence (5432)
+
+Host ports 8081 and 6380 are used instead of the conventional 8080 and 6379 so
+the stack can run alongside the separate `fopconverter` project, which publishes
+those two ports. Containers still address each other by service name over the
+internal compose network (`redis:6379`), so the remapping is host-side only.
+
+All infrastructure ports are bound to `127.0.0.1`, so they are reachable from the
+host but not from the network. Containers talk to each other over the internal
+compose network.
 
 ### Quick start with Docker
 
-```powershell
-# Build and start all services
-docker compose -f .\deploy\docker\docker-compose.yml up --build
+Authentication is **enabled** in the Docker stack, so a JWT signing key must be
+supplied. Compose fails fast with a clear message if it is missing.
 
-# Or run in detached mode
+```powershell
+# 1. Create the env file next to docker-compose.yml
+copy .\deploy\docker\.env.example .\deploy\docker\.env
+
+# 2. Put a random secret of at least 32 characters into GDS_AUTH_SIGNING_KEY
+#    in .\deploy\docker\.env  (this file is gitignored)
+
+# 3. Build and start all services
 docker compose -f .\deploy\docker\docker-compose.yml up --build -d
 ```
 
@@ -161,24 +176,72 @@ docker compose -f .\deploy\docker\docker-compose.yml up --build -d
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| **API** | http://localhost:8080 | — |
-| **Scalar API Reference** | http://localhost:8080/scalar/v1 | — |
-| **OpenAPI JSON** | http://localhost:8080/openapi/v1.json | — |
+| **API** | http://localhost:8081 | JWT required (see below) |
+| **Scalar API Reference** | http://localhost:8081/scalar/v1 | — |
+| **OpenAPI JSON** | http://localhost:8081/openapi/v1.json | — |
 | **RabbitMQ Management** | http://localhost:15672 | guest / guest |
 | **MinIO Console** | http://localhost:9001 | minioadmin / minioadmin |
 | **PostgreSQL** | localhost:5432 | postgres / postgres |
+| **Redis** | localhost:6380 | — |
+
+Health endpoints (`/health/live`, `/health/ready`) stay anonymous so container
+and orchestrator probes keep working.
+
+### Getting a token
+
+Tokens are HS256 JWTs signed with `GDS_AUTH_SIGNING_KEY`. Roles are read from the
+standard `role` claim; `DocumentAdmin` satisfies every policy.
+
+```powershell
+function New-GdsToken {
+    param(
+        [string]$Key = $env:GDS_AUTH_SIGNING_KEY,
+        [string]$Role = "DocumentAdmin",
+        [int]$TtlMinutes = 60
+    )
+
+    function ConvertTo-Base64Url([byte[]]$bytes) {
+        [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    }
+
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $header = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"HS256","typ":"JWT"}'))
+    $payloadJson = @{
+        iss = "GenerateDocService"
+        aud = "GenerateDocService.Api"
+        sub = "local-dev"
+        role = $Role
+        nbf = $now
+        iat = $now
+        exp = $now + ($TtlMinutes * 60)
+    } | ConvertTo-Json -Compress
+    $payload = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($payloadJson))
+
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes($Key))
+    $signature = ConvertTo-Base64Url ($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes("$header.$payload")))
+
+    "$header.$payload.$signature"
+}
+```
 
 ### Example API requests
 
+All `/api/v1/*` calls need the bearer token when auth is enabled:
+
+```powershell
+$token = New-GdsToken
+$auth = "Authorization: Bearer $token"
+```
+
 **List engines:**
 ```powershell
-curl http://localhost:8080/api/v1/engines
+curl http://localhost:8081/api/v1/engines -H $auth
 ```
 
 **Generate document synchronously (MiniExcel):**
 ```powershell
-curl -X POST http://localhost:8080/api/v1/documents/sync `
-  -H "Content-Type: application/json" `
+curl -X POST http://localhost:8081/api/v1/documents/sync `
+  -H "Content-Type: application/json" -H $auth `
   -d '{
     "engine": "miniexcel",
     "inputFormat": "json",
@@ -189,8 +252,8 @@ curl -X POST http://localhost:8080/api/v1/documents/sync `
 
 **Generate document synchronously (FOP):**
 ```powershell
-curl -X POST http://localhost:8080/api/v1/documents/sync `
-  -H "Content-Type: application/json" `
+curl -X POST http://localhost:8081/api/v1/documents/sync `
+  -H "Content-Type: application/json" -H $auth `
   -d '{
     "engine": "fop",
     "inputFormat": "xsl-fo",
@@ -201,8 +264,8 @@ curl -X POST http://localhost:8080/api/v1/documents/sync `
 
 **Generate document asynchronously:**
 ```powershell
-curl -X POST http://localhost:8080/api/v1/documents/async `
-  -H "Content-Type: application/json" `
+curl -X POST http://localhost:8081/api/v1/documents/async `
+  -H "Content-Type: application/json" -H $auth `
   -d '{
     "engine": "scriban",
     "inputFormat": "json",
@@ -215,12 +278,12 @@ curl -X POST http://localhost:8080/api/v1/documents/async `
 
 **Check task status:**
 ```powershell
-curl http://localhost:8080/api/v1/tasks/{taskId}
+curl http://localhost:8081/api/v1/tasks/{taskId} -H $auth
 ```
 
 **Download generated document:**
 ```powershell
-curl http://localhost:8080/api/v1/tasks/{taskId}/download --output document.xlsx
+curl http://localhost:8081/api/v1/tasks/{taskId}/download -H $auth --output document.xlsx
 ```
 
 ### Stop services
@@ -261,15 +324,22 @@ Configure limits via `DocumentProcessing:Validation` in `appsettings.json`.
 
 API supports JWT bearer authentication with role-based authorization:
 
-- **Disabled by default** — local development requires no tokens
-- **Enable** by setting `DocumentProcessing:Authentication:Enabled = true`
+- **Disabled by default** when running with `dotnet run`, so local development needs no tokens
+- **Enabled in the Docker stack** — `docker-compose.yml` sets `DocumentProcessing__Authentication__Enabled=true`
 - **Roles**: `DocumentSubmit`, `DocumentRead`, `DocumentDownload`, `DocumentAdmin`
 - **Endpoint mapping**:
   - `POST /documents/*` → `DocumentSubmit` or `DocumentAdmin`
   - `GET /engines/*`, `GET /tasks/{taskId}` → `DocumentRead` or `DocumentAdmin`
   - `GET /tasks/{taskId}/download` → `DocumentDownload` or `DocumentAdmin`
+  - `GET /health/*` → anonymous, so probes keep working
 
-Configure JWT settings via `DocumentProcessing:Authentication` (Issuer, Audience, SigningKey).
+Configure JWT settings via `DocumentProcessing:Authentication` (`Issuer`, `Audience`, `SigningKey`).
+
+The signing key has **no committed default**. When authentication is enabled the
+host fails fast at startup if `SigningKey` is empty or shorter than 32
+characters, so a missing secret cannot silently degrade into a well-known key.
+Supply it through configuration or the `GDS_AUTH_SIGNING_KEY` environment
+variable (see `deploy/docker/.env.example`); never commit the real value.
 
 ## Artifact retention
 
