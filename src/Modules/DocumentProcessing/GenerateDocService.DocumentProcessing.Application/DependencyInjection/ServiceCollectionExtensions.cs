@@ -11,7 +11,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<GenerateDocService.Engine.Abstractions.ICompiledTemplateCache, Services.InMemoryCompiledTemplateCache>();
         services.AddSingleton<Abstractions.Caching.IGeneratedDocumentCache, Services.InMemoryGeneratedDocumentCache>();
         services.AddSingleton<Abstractions.Caching.IGenerationRequestDeduplicationStore, Services.InMemoryGenerationRequestDeduplicationStore>();
-        services.AddScoped<Abstractions.Persistence.IDocumentGenerationTaskRepository, Services.InMemoryDocumentGenerationTaskRepository>();
+        // In-memory repository holds task state in an instance field, so it must be a
+        // singleton; a scoped registration would drop every task between requests.
+        // The PostgreSQL implementation is registered as scoped by Infrastructure.
+        services.AddSingleton<Abstractions.Persistence.IDocumentGenerationTaskRepository, Services.InMemoryDocumentGenerationTaskRepository>();
         services.AddSingleton<Abstractions.Storage.IDocumentArtifactStore, Services.InMemoryDocumentArtifactStore>();
         services.AddSingleton<Abstractions.Messaging.IDocumentGenerationEventPublisher, Services.NullDocumentGenerationEventPublisher>();
         services.AddScoped<Abstractions.Messaging.IBackgroundDocumentGenerationProcessor, Services.BackgroundDocumentGenerationProcessor>();
