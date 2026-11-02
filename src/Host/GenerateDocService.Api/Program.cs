@@ -7,6 +7,7 @@ using GenerateDocService.DocumentProcessing.Application.Models;
 using GenerateDocService.DocumentProcessing.Application.Services;
 using GenerateDocService.DocumentProcessing.Infrastructure.DependencyInjection;
 using GenerateDocService.DocumentProcessing.Presentation.Contracts;
+using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
@@ -90,14 +91,16 @@ if (authOptions.Enabled)
 
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
-    Predicate = registration => registration.Tags.Contains("live")
+    Predicate = registration => registration.Tags.Contains("live"),
+    ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
 })
     .WithName("GetLiveHealth")
     .WithTags("Health");
 
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
-    Predicate = registration => registration.Tags.Contains("ready")
+    Predicate = registration => registration.Tags.Contains("ready"),
+    ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
 })
     .WithName("GetReadyHealth")
     .WithTags("Health");
