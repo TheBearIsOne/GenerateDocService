@@ -99,7 +99,8 @@ Infrastructure now hosts MassTransit directly:
 - default transport: `InMemory`
 - production-ready transport option: `RabbitMQ`
 - consumer: `GenerateDocumentRequestedConsumer`
-- scheduler publishes `GenerateDocumentRequested` through the bus
+- with the `InMemory` transport the scheduler publishes `GenerateDocumentRequested` and MassTransit routes it to the consumer by convention
+- with the `RabbitMQ` transport the scheduler *sends* it to the queue named by `DocumentProcessing:Messaging:QueueName` (default `document-generation`), and the consumer's receive endpoint is bound to that same name. The two must stay in sync — a mismatch leaves messages sitting in a queue with no consumers
 - result events are published as `DocumentGenerated` / `DocumentGenerationFailed`
 
 ## Caching and deduplication foundation
@@ -124,11 +125,24 @@ Infrastructure configuration now supports:
 
 Task persistence now supports a PostgreSQL-backed EF Core repository for durable async task storage.
 
+The schema is versioned with EF Core migrations under `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Infrastructure/Persistence/Migrations`. When the `PostgreSql` provider is selected, both the API and the worker apply pending migrations on startup; they serialise behind a PostgreSQL advisory lock so several hosts starting together cannot race on DDL. Nothing is applied for the `InMemory` provider.
+
+To add a migration after changing `DocumentGenerationDbContext`:
+
+```powershell
+dotnet tool restore
+dotnet ef migrations add <Name> --project src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Infrastructure --output-dir Persistence/Migrations
+```
+
+`dotnet-ef` is pinned as a local tool in `.config/dotnet-tools.json`, so `dotnet tool restore` is required once per clone. Scaffolding uses `DocumentGenerationDbContextFactory`, a design-time-only factory, which keeps `dotnet ef` from booting the API host.
+
 Redis adapters for generated document cache, request deduplication, and compiled templates are implemented and can be enabled through configuration.
 
 Object storage support now includes a MinIO implementation of `IDocumentArtifactStore`.
 
-The FOP adapter calls `POST /api/v1/convert/sync` on the FOP Converter API with a multipart `primaryDocument` part. Configure its base URL with `DocumentProcessing:Fop:BaseUrl`; it defaults to `http://localhost:8080/` and its OpenAPI document is available at `/v3/api-docs`. The converter is a separate stack, not part of `docker-compose.yml`. Note that this default only resolves when calling from the host: inside the API container `localhost:8080` is the container itself, so set `DocumentProcessing__Fop__BaseUrl` to a network-reachable address for containerized runs.
+The FOP adapter calls `POST /api/v1/convert/sync` on the FOP Converter API with a multipart `primaryDocument` part. Configure its base URL with `DocumentProcessing:Fop:BaseUrl`; it defaults to `http://localhost:8080/` and the converter's OpenAPI document is available at `/v3/api-docs`. The converter is a separate stack, not part of `docker-compose.yml`.
+
+That default only resolves when calling from the host — inside a container `localhost:8080` is the container itself. The compose stack therefore sets `DocumentProcessing__Fop__BaseUrl` on both the API and the worker to `${FOP_CONVERTER_BASE_URL:-http://host.docker.internal:8080/}` and adds the `host.docker.internal:host-gateway` host entry, so the `fop` engine reaches a converter published on the Docker host. Override `FOP_CONVERTER_BASE_URL` in `deploy/docker/.env` if the converter listens elsewhere or joins this compose network.
 
 ## Local infrastructure
 

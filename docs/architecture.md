@@ -96,6 +96,7 @@ Contains technical adapters and provider switching:
 - Redis cache and dedup implementations;
 - MinIO artifact storage;
 - MassTransit bus integration;
+- EF Core PostgreSQL persistence, migrations, and advisory-locked schema application at startup;
 - health checks;
 - assembly scanning for engines and template parsers.
 - configured `HttpClient` registration for the external FOP converter.

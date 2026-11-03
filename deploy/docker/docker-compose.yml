@@ -27,6 +27,12 @@ services:
       DocumentProcessing__Storage__ObjectStorage__CreateBucketIfMissing: 'true'
       DocumentProcessing__Persistence__Provider: PostgreSql
       DocumentProcessing__Persistence__PostgreSql__ConnectionString: Host=postgres;Port=5432;Database=generatedocservice;Username=postgres;Password=postgres
+      # The FOP converter runs in a separate compose project, so the in-container
+      # default of localhost:8080 would resolve to this container instead.
+      DocumentProcessing__Fop__BaseUrl: ${FOP_CONVERTER_BASE_URL:-http://host.docker.internal:8080/}
+    extra_hosts:
+      # Makes host.docker.internal resolve on Linux Docker Engine as well as Docker Desktop.
+      - "host.docker.internal:host-gateway"
     ports:
       # Host port 8081 avoids clashing with the fopconverter stack on 8080.
       - "8081:8080"
@@ -58,6 +64,10 @@ services:
       DocumentProcessing__Storage__ObjectStorage__CreateBucketIfMissing: 'true'
       DocumentProcessing__Persistence__Provider: PostgreSql
       DocumentProcessing__Persistence__PostgreSql__ConnectionString: Host=postgres;Port=5432;Database=generatedocservice;Username=postgres;Password=postgres
+      # The worker performs the async generation, so it needs the converter too.
+      DocumentProcessing__Fop__BaseUrl: ${FOP_CONVERTER_BASE_URL:-http://host.docker.internal:8080/}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - rabbitmq
       - redis

@@ -73,6 +73,8 @@ builder.Services
 
 var app = builder.Build();
 
+await app.Services.ApplyDocumentProcessingMigrationsAsync(builder.Configuration);
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

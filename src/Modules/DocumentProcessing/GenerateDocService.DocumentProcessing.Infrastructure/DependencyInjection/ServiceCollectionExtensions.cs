@@ -228,7 +228,12 @@ public static class ServiceCollectionExtensions
                             hostConfigurator.Password(messagingOptions.RabbitMq.Password);
                         });
 
-                    cfg.ConfigureEndpoints(context);
+                    // The scheduler sends straight to queue:<QueueName>, so the consumer has to
+                    // listen on that endpoint instead of the convention-derived message name.
+                    cfg.ReceiveEndpoint(messagingOptions.QueueName, endpoint =>
+                    {
+                        endpoint.ConfigureConsumer<GenerateDocumentRequestedConsumer>(context);
+                    });
                 });
 
                 return;

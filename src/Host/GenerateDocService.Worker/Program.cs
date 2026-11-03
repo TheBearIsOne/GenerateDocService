@@ -45,4 +45,5 @@ builder.Services
     });
 
 var host = builder.Build();
+await host.Services.ApplyDocumentProcessingMigrationsAsync(builder.Configuration);
 host.Run();

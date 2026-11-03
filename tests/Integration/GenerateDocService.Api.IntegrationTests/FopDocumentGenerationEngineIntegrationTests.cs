@@ -3,21 +3,19 @@ using FluentAssertions;
 using GenerateDocService.DocumentProcessing.Application.Models;
 using GenerateDocService.Engine.Fop;
 using GenerateDocService.Engine.Scriban;
-using Xunit.Sdk;
 
 namespace GenerateDocService.Api.IntegrationTests;
 
 public sealed class FopDocumentGenerationEngineIntegrationTests
 {
-    [Fact]
+    [SkippableFact]
     [Trait("Category", "ExternalDependency")]
     public async Task GenerateAsync_ShouldCreatePdfArtifactUsingConfiguredConverter()
     {
         var baseUrl = Environment.GetEnvironmentVariable("FOP_CONVERTER_BASE_URL");
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var converterUri))
-        {
-          throw SkipException.ForSkip("Set FOP_CONVERTER_BASE_URL to run the FOP converter integration test.");
-        }
+        Skip.If(
+            !Uri.TryCreate(baseUrl, UriKind.Absolute, out var converterUri),
+            "Set FOP_CONVERTER_BASE_URL to run the FOP converter integration test.");
 
         using var client = new HttpClient { BaseAddress = converterUri };
         var scriban = new ScribanDocumentGenerationEngine();
