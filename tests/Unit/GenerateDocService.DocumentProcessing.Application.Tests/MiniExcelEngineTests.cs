@@ -356,8 +356,11 @@ public sealed class MiniExcelEngineTests
     [Fact]
     public async Task GenerateAsync_ShouldThrowWhenTemplatePlaceholderResolvesToNestedObject()
     {
-        // Characterization: the engine hands a Dictionary to MiniExcel's template
-        // renderer, which fails with an unhandled low-level exception.
+        // Accepted behaviour, not an oversight. MiniExcel's template renderer supports nested and
+        // collection values for its {{$list.field}} syntax, so the engine cannot reject nesting
+        // wholesale without breaking legitimate templates, and it cannot tell which placeholder a
+        // value belongs to without parsing the workbook XML. Telling the two cases apart belongs in
+        // MiniExcel; this test pins what callers get today so a change is noticed.
         var engine = new MiniExcelDocumentGenerationEngine();
         var request = BuildRequest(
             "tpl-nested",
@@ -372,7 +375,7 @@ public sealed class MiniExcelEngineTests
     [Fact]
     public async Task GenerateAsync_ShouldThrowWhenTemplatePlaceholderResolvesToArray()
     {
-        // Characterization: same root cause as the nested-object case.
+        // Accepted behaviour for the same reason as the nested-object case above.
         var engine = new MiniExcelDocumentGenerationEngine();
         var request = BuildRequest(
             "tpl-array-value",
@@ -589,32 +592,73 @@ public sealed class MiniExcelEngineTests
     }
 
     [Fact]
-    public async Task GenerateAsync_ShouldThrowWhenArrayItemsHaveInconsistentShapes()
+    public async Task GenerateAsync_ShouldAlignArrayItemsWithInconsistentShapes()
     {
-        // Characterization: headers come from the first item, so later items that
-        // lack those keys surface as an unhandled KeyNotFoundException.
+        // Headers used to come from the first item only, so later items that lacked those keys
+        // surfaced as an unhandled KeyNotFoundException. Rows are now aligned to the union of keys.
         var engine = new MiniExcelDocumentGenerationEngine();
-        var request = BuildRequest("bad-mixed", """[{"Name":"A"},"plain",42,null]""");
+        var request = BuildRequest("mixed-shapes", """[{"Name":"A"},"plain",42,null]""");
 
-        await ((Func<Task>)(async () => await engine.GenerateAsync(request)))
-            .Should().ThrowAsync<KeyNotFoundException>();
+        var result = await engine.GenerateAsync(request);
+        var rows = ReadRows(result.Content.ReadFully());
+
+        rows.Should().HaveCount(4);
+        rows[0]["Name"].Should().Be("A");
+        rows[1]["value"].Should().Be("plain");
+        rows[2]["value"]?.ToString().Should().Be("42");
+
+        if (result is IDisposable disposable) disposable.Dispose();
     }
 
     [Fact]
-    public async Task GenerateAsync_ShouldLeakTypeNameIntoCellWhenValueIsNestedObject()
+    public async Task GenerateAsync_ShouldRejectANestedObjectInTableOutput()
     {
-        // Characterization: nested objects are not flattened; the CLR type name is
-        // written into the sheet, silently corrupting the data.
+        // MiniExcel used to write the CLR type name into the cell and report success, so a corrupt
+        // workbook shipped silently. A cell cannot hold a structure, so this now fails loudly.
         var engine = new MiniExcelDocumentGenerationEngine();
-        var request = BuildRequest("bad-nested", """[{"a":{"b":{"c":"deep"}}}]""");
+        var request = BuildRequest("nested", """[{"a":{"b":{"c":"deep"}}}]""");
 
-        var result = await engine.GenerateAsync(request);
-        var row = ReadRows(result.Content.ReadFully()).Single();
+        await ((Func<Task>)(async () => await engine.GenerateAsync(request)))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*$.a*worksheet cell*");
+    }
 
-        row["a"].ToString().Should().Contain("Dictionary");
-        row["a"].ToString().Should().NotContain("deep");
+    [Fact]
+    public async Task GenerateAsync_ShouldRejectANestedArrayInTableOutput()
+    {
+        var engine = new MiniExcelDocumentGenerationEngine();
+        var request = BuildRequest("nested-array", """[{"tags":["x","y"]}]""");
 
-        if (result is IDisposable disposable) disposable.Dispose();
+        await ((Func<Task>)(async () => await engine.GenerateAsync(request)))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*$.tags*worksheet cell*");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ShouldFormatTemplateNumbersInvariantly_UnderAnyAmbientCulture()
+    {
+        // The template path used to format with the ambient culture, so the same request produced
+        // 1234.56 on an invariant host and 1234,56 on a ru-RU one.
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ru-RU");
+
+            var engine = new MiniExcelDocumentGenerationEngine();
+            var request = BuildRequest("culture-invariant", """{"amount":1234.56}""", CreateXlsxTemplate("{{amount}}"));
+
+            var result = await engine.GenerateAsync(request);
+            var worksheetXml = ReadWorkbookXml(result.Content.ReadFully());
+
+            worksheetXml.Should().Contain("1234.56");
+            worksheetXml.Should().NotContain("1234,56");
+
+            if (result is IDisposable disposable) disposable.Dispose();
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = original;
+        }
     }
 
     [Theory]

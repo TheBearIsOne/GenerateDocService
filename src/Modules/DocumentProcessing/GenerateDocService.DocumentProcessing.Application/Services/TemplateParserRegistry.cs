@@ -13,15 +13,29 @@ public sealed class TemplateParserRegistry : ITemplateParserRegistry
         _parserMap = BuildParserMap(_parsers);
     }
 
-    public ITemplateParser Resolve(string templateFormat)
+    public ITemplateParser Resolve(string templateFormat, string? preferredParserName = null)
     {
         var candidates = FindCandidates(templateFormat);
-        if (candidates.Count > 0)
+        if (candidates.Count == 0)
         {
-            return candidates.First();
+            throw new InvalidOperationException($"Template parser for format '{templateFormat}' is not registered.");
         }
 
-        throw new InvalidOperationException($"Template parser for format '{templateFormat}' is not registered.");
+        // Scriban and DotLiquid both claim txt, html, md and markdown, and FindCandidates sorts by
+        // name, so without this the alphabetically first parser always won and the other engine
+        // rejected the compiled template at generation time.
+        if (preferredParserName is not null)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (string.Equals(candidate.Name, preferredParserName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return candidates.First();
     }
 
     public IReadOnlyCollection<ITemplateParser> GetAll() => _parsers;

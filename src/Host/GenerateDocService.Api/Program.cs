@@ -1,4 +1,5 @@
 using System.Text;
+using GenerateDocService.Api;
 using GenerateDocService.Api.Correlation;
 using GenerateDocService.Api.Security;
 using GenerateDocService.Api.Validation;
@@ -9,6 +10,7 @@ using GenerateDocService.DocumentProcessing.Infrastructure.DependencyInjection;
 using GenerateDocService.DocumentProcessing.Presentation.Contracts;
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using OpenTelemetry.Metrics;
@@ -36,6 +38,11 @@ var authOptions = builder.Configuration
     .GetSection(AuthenticationOptions.SectionName)
     .Get<AuthenticationOptions>()
     ?? new AuthenticationOptions();
+
+var apiOptions = builder.Configuration
+    .GetSection(ApiHostOptions.SectionName)
+    .Get<ApiHostOptions>()
+    ?? new ApiHostOptions();
 
 builder.Services.AddDocumentAuthentication(builder.Configuration, authOptions);
 
@@ -75,7 +82,7 @@ var app = builder.Build();
 
 await app.Services.ApplyDocumentProcessingMigrationsAsync(builder.Configuration);
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || apiOptions.ExposeOpenApi)
 {
     app.MapOpenApi();
     app.MapScalarApiReference();
@@ -91,10 +98,17 @@ if (authOptions.Enabled)
     app.UseAuthorization();
 }
 
+// The probes stay anonymous, and the detailed writer publishes engine implementation class names,
+// so detail is opt-in outside Development.
+Func<HttpContext, HealthReport, Task> healthResponseWriter =
+    app.Environment.IsDevelopment() || apiOptions.ExposeHealthDetails
+        ? UIResponseWriter.WriteHealthCheckUIResponse
+        : WriteOverallStatusOnly;
+
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
     Predicate = registration => registration.Tags.Contains("live"),
-    ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
+    ResponseWriter = healthResponseWriter
 })
     .WithName("GetLiveHealth")
     .WithTags("Health");
@@ -102,7 +116,7 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = registration => registration.Tags.Contains("ready"),
-    ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
+    ResponseWriter = healthResponseWriter
 })
     .WithName("GetReadyHealth")
     .WithTags("Health");
@@ -147,10 +161,12 @@ app.MapPost("/api/v1/documents/sync", async (
     CancellationToken cancellationToken) =>
 {
     var command = ToApplicationRequest(request, httpContext);
-    using var result = await service.GenerateAsync(command, cancellationToken);
+    var result = await service.GenerateAsync(command, cancellationToken);
 
+    // Results.File disposes the stream once the response has been written, so handing it the
+    // generated content directly avoids materialising a second full copy of the document.
     return Results.File(
-        result.ToByteArray(),
+        result.Content,
         result.ContentType,
         result.FileName);
 })
@@ -222,7 +238,7 @@ app.MapGet("/api/v1/tasks/{taskId}/download", async (
     }
 
     return Results.File(
-        artifact.ToByteArray(),
+        artifact.OpenRead(),
         artifact.ContentType,
         artifact.FileName);
 })
@@ -282,4 +298,12 @@ static string? BuildDownloadUrl(HttpContext httpContext, TaskStatusResponse resp
     }
 
     return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}/api/v1/tasks/{response.TaskId}/download";
+}
+
+// HealthCheckResponseWriters.WriteMinimalUIResponse is internal, so the bare-status response an
+// orchestrator wants is written here instead.
+static Task WriteOverallStatusOnly(HttpContext context, HealthReport report)
+{
+    context.Response.ContentType = "text/plain; charset=utf-8";
+    return context.Response.WriteAsync(report.Status.ToString());
 }

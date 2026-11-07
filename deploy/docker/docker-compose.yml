@@ -7,8 +7,14 @@ services:
       context: ../..
       dockerfile: src/Host/GenerateDocService.Api/Dockerfile
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      # Production, so the container does not serve the developer exception page: it renders stack
+      # traces and absolute source paths to any caller.
+      ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      # Scalar and OpenAPI are documented for this stack, so opt in explicitly instead of relying on
+      # the Development environment. Health probes stay minimal; set
+      # DocumentProcessing__Api__ExposeHealthDetails to 'true' to publish per-check detail.
+      DocumentProcessing__Api__ExposeOpenApi: 'true'
       DocumentProcessing__Authentication__Enabled: 'true'
       DocumentProcessing__Authentication__SigningKey: ${GDS_AUTH_SIGNING_KEY:?GDS_AUTH_SIGNING_KEY must be set to a secret of at least 32 characters}
       DocumentProcessing__Caching__Provider: Redis

@@ -161,7 +161,7 @@ static List<EngineExample> BuildExamples()
             client => RunSyncAsync(
                 client,
                 TextRequest(
-                    "scriban", "json", "html", "scriban", customerPayload,
+                    "scriban", "json", "html", "html", customerPayload,
                     "<h1>{{ document }}</h1><p>Customer: {{ customer.name }}</p>"),
                 "scriban html")),
 
@@ -173,7 +173,7 @@ static List<EngineExample> BuildExamples()
             client => RunSyncAsync(
                 client,
                 TextRequest(
-                    "scriban", "json", "md", "scriban", customerPayload,
+                    "scriban", "json", "md", "md", customerPayload,
                     "# {{ document }}\n\nCustomer: **{{ customer.name }}**"),
                 "scriban markdown")),
 

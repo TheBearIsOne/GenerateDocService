@@ -205,6 +205,8 @@ public sealed class BackgroundDocumentGenerationProcessor(
             return typedResult;
         }
 
+        // The engine result is only needed until its content has been copied.
+        using var engineResult = result as IDisposable;
         using var stream = new MemoryStream();
         await result.Content.CopyToAsync(stream, cancellationToken);
 

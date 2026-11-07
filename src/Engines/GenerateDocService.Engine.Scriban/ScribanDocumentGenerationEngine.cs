@@ -79,7 +79,7 @@ public sealed class ScribanDocumentGenerationEngine : IDocumentGenerationEngine
 
     private async Task<Template> ResolveTemplateAsync(IReportRequest request, JsonElement root, CancellationToken cancellationToken)
     {
-        var templateParser = _templateParserRegistry.Resolve(request.TemplateFormat ?? "scriban");
+        var templateParser = _templateParserRegistry.Resolve(request.TemplateFormat ?? "scriban", Name);
 
         if (request.Template is { } template && !template.IsEmpty)
         {
@@ -180,7 +180,7 @@ public sealed class ScribanDocumentGenerationEngine : IDocumentGenerationEngine
 
     private sealed class DefaultTemplateParserRegistry(ITemplateParser parser) : ITemplateParserRegistry
     {
-        public ITemplateParser Resolve(string templateFormat)
+        public ITemplateParser Resolve(string templateFormat, string? preferredParserName = null)
             => parser.CanHandle(templateFormat)
                 ? parser
                 : throw new InvalidOperationException($"Template parser for format '{templateFormat}' is not registered.");

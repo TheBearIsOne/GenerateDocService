@@ -75,6 +75,16 @@ Current engines:
 - `minipdf` for .docx/.xlsx-to-PDF conversion (payload is base64-encoded source document).
 - `fop` for FO/XSL-FO-to-PDF conversion through the external FOP Converter API.
 
+### MiniExcel payload rules
+
+The table path (`template` omitted) writes one row per item and applies three rules:
+
+- **Numbers are formatted invariantly.** The engine pins `CultureInfo.InvariantCulture`, so `1234.56` is written the same way regardless of the host's locale. Previously the template path used the ambient culture and produced `1234,56` on a `ru-RU` host.
+- **Nested values are rejected.** A JSON object or array where a cell is expected throws `InvalidOperationException` naming the JSON path, for example `$.address`. Previously the CLR type name `System.Collections.Generic.Dictionary\`2[...]` was written into the cell and the request reported success, so a corrupt workbook shipped silently. Flatten nested data in the payload.
+- **Ragged items are aligned.** Headers are the union of every item's keys and missing values become empty cells. Previously headers came from the first item only, so an item missing a key raised an unhandled `KeyNotFoundException` and an item adding one had it dropped.
+
+One MiniExcel limitation is accepted rather than fixed: on the *template* path a `{{placeholder}}` bound to a nested object or array raises an unhandled `IndexOutOfRangeException` from MiniExcel's renderer. The engine cannot reject nesting there without breaking MiniExcel's supported `{{$list.field}}` collection syntax, and cannot tell the two apart without parsing the template's tokens.
+
 This keeps the current modular monolith ready for future extraction of engines into isolated modules or services.
 
 ## Async pipeline foundation
@@ -429,6 +439,17 @@ Health checks cover:
 - RabbitMQ TCP readiness when RabbitMQ transport is enabled;
 - MinIO/object storage TCP readiness when object storage provider is enabled.
 
+### Developer surface exposure
+
+`DocumentProcessing:Api` controls two things that are useful locally but leak implementation detail in production. Both are forced on by the Development environment, so `dotnet run` needs no configuration:
+
+| Setting | Default | Effect when true |
+|---------|---------|------------------|
+| `ExposeOpenApi` | false | Serves `/openapi/v1.json` and the Scalar UI |
+| `ExposeHealthDetails` | false | Returns per-check JSON from `/health/live` and `/health/ready` |
+
+With `ExposeHealthDetails` false the probes answer with the bare overall status, which keeps engine implementation class names such as `ScribanDocumentGenerationEngine` away from anonymous callers. The compose stack runs `ASPNETCORE_ENVIRONMENT=Production` and sets `ExposeOpenApi=true` because Scalar is documented above; it leaves health detail off. Running as Production also removes the developer exception page, so an unhandled error no longer returns a stack trace with absolute source paths.
+
 Correlation id:
 
 - request header: `X-Correlation-Id`
@@ -500,7 +521,7 @@ Example async status response:
   "status": 2,
   "resultFileName": "d8f45ab3f8994fd68f1f1c84263dc8f0.txt",
   "resultStoragePath": "artifacts/d8f45ab3f8994fd68f1f1c84263dc8f0/d8f45ab3f8994fd68f1f1c84263dc8f0.txt",
-  "downloadUrl": "https://localhost:7001/api/v1/tasks/d8f45ab3f8994fd68f1f1c84263dc8f0/download",
+  "downloadUrl": "http://localhost:5287/api/v1/tasks/d8f45ab3f8994fd68f1f1c84263dc8f0/download",
   "error": null,
   "createdAtUtc": "2026-01-01T12:00:00Z",
   "updatedAtUtc": "2026-01-01T12:00:01Z"
@@ -600,27 +621,27 @@ The third CLI argument selects the async profile.
 Example: compare explicit Scriban routing against auto-selection routing:
 
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_explicit async_scriban_auto
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_explicit async_scriban_auto
 ```
 
 Example: run PDF baseline together with explicit async Scriban:
 
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_questpdf async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_questpdf async_scriban_explicit
 ```
 
 Example: compare warm vs cold template-cache path for Scriban:
 
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_warm async_scriban_explicit
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_cold async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_warm async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_cold async_scriban_explicit
 ```
 
 Example: compare Scriban and DotLiquid on the same sync text-generation flow:
 
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_explicit async_dotliquid_explicit
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_dotliquid_explicit async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_explicit async_dotliquid_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_dotliquid_explicit async_scriban_explicit
 ```
 
 By default, NBomber reports are written to:
@@ -630,7 +651,7 @@ By default, NBomber reports are written to:
 You can override the report root with a fourth CLI argument:
 
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_warm async_scriban_explicit .\artifacts\perf
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_warm async_scriban_explicit .\artifacts\perf
 ```
 
 Recommended baseline comparison workflow:

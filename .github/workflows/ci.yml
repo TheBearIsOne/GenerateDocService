@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore GenerateDocService.slnx
+
+      # NU1902/NU1903 are NuGet's known-vulnerability diagnostics. Promoting them to errors means a
+      # newly published advisory, or an accidental downgrade, fails the build instead of scrolling
+      # past as one of dozens of warnings. %3B is MSBuild's escape for the ';' list separator; the
+      # shell would otherwise split the argument and MSBuild rejects it with MSB1006.
+      - name: Build (advisories are errors)
+        run: >-
+          dotnet build GenerateDocService.slnx
+          --configuration Release
+          --no-restore
+          -p:WarningsAsErrors=NU1902%3BNU1903
+
+      - name: Unit tests
+        run: >-
+          dotnet test tests/Unit/GenerateDocService.DocumentProcessing.Application.Tests/GenerateDocService.DocumentProcessing.Application.Tests.csproj
+          --configuration Release --no-build --logger trx --results-directory TestResults
+
+      # The ubuntu runners have a Docker daemon, so the Category=RequiresDocker tests start real
+      # PostgreSQL and RabbitMQ containers here rather than skipping.
+      - name: Integration tests
+        run: >-
+          dotnet test tests/Integration/GenerateDocService.Api.IntegrationTests/GenerateDocService.Api.IntegrationTests.csproj
+          --configuration Release --no-build --logger trx --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+          if-no-files-found: warn

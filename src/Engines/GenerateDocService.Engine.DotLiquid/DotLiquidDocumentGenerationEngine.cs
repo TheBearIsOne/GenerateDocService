@@ -71,7 +71,7 @@ public sealed class DotLiquidDocumentGenerationEngine : IDocumentGenerationEngin
 
     private async Task<Template> ResolveTemplateAsync(IReportRequest request, JsonElement root, CancellationToken cancellationToken)
     {
-        var templateParser = _templateParserRegistry.Resolve(request.TemplateFormat ?? "liquid");
+        var templateParser = _templateParserRegistry.Resolve(request.TemplateFormat ?? "liquid", Name);
 
         if (request.Template is { } template && !template.IsEmpty)
         {
@@ -171,7 +171,7 @@ public sealed class DotLiquidDocumentGenerationEngine : IDocumentGenerationEngin
 
     private sealed class DefaultTemplateParserRegistry(ITemplateParser parser) : ITemplateParserRegistry
     {
-        public ITemplateParser Resolve(string templateFormat)
+        public ITemplateParser Resolve(string templateFormat, string? preferredParserName = null)
             => parser.CanHandle(templateFormat)
                 ? parser
                 : throw new InvalidOperationException($"Template parser for format '{templateFormat}' is not registered.");

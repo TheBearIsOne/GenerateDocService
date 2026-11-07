@@ -35,19 +35,19 @@ Benchmarks are run using the NBomber project at `tests/Performance/GenerateDocSe
 
 ### Warm vs Cold Cache (Scriban)
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_warm async_scriban_explicit
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_cold async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_warm async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_cold async_scriban_explicit
 ```
 
 ### Scriban vs DotLiquid
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_explicit async_dotliquid_explicit
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_dotliquid_explicit async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_explicit async_dotliquid_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_dotliquid_explicit async_scriban_explicit
 ```
 
 ### PDF Baseline
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_questpdf async_scriban_explicit
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_questpdf async_scriban_explicit
 ```
 
 `sync_questpdf` measures the in-process PDF engine. The FOP adapter is an external HTTP dependency and does not yet have an NBomber profile; establish its own baseline only after the converter host, payload size, and network placement are fixed.
@@ -56,7 +56,7 @@ For manual correctness inspection, the unit suite saves outputs from every in-pr
 
 ### Explicit vs Auto-Selection
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_explicit async_scriban_auto
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_explicit async_scriban_auto
 ```
 
 ## Metrics
@@ -85,7 +85,7 @@ artifacts/perf/<timestamp>-<sync-profile>-<async-profile>/
 
 Override with a 4th CLI argument:
 ```powershell
-dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- https://localhost:7001 sync_scriban_warm async_scriban_explicit .\artifacts\perf
+dotnet run --project tests/Performance/GenerateDocService.LoadTests.NBomber -- http://localhost:5287 sync_scriban_warm async_scriban_explicit .\artifacts\perf
 ```
 
 Keep report folders as historical snapshots for regression comparison.
