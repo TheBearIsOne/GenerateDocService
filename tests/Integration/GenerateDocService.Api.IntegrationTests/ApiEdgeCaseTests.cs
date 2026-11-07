@@ -154,7 +154,9 @@ public sealed class ApiEdgeCaseTests : IClassFixture<WebApplicationFactory<Progr
 
     private static async Task<TaskStatusHttpResponse> WaitForFinalStatusAsync(HttpClient client, string taskId)
     {
-        for (var attempt = 0; attempt < 20; attempt++)
+        // A generous budget: the container-backed fixtures in this project load the machine enough
+        // that a tight poll window flakes even though generation itself completes in milliseconds.
+        for (var attempt = 0; attempt < 120; attempt++)
         {
             var response = await client.GetAsync($"/api/v1/tasks/{taskId}");
             var payload = await response.Content.ReadFromJsonAsync<TaskStatusHttpResponse>();
@@ -167,7 +169,7 @@ public sealed class ApiEdgeCaseTests : IClassFixture<WebApplicationFactory<Progr
                 return payload;
             }
 
-            await Task.Delay(100);
+            await Task.Delay(250);
         }
 
         throw new TimeoutException($"Task '{taskId}' did not reach a final state in time.");

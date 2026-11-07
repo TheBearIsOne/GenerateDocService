@@ -627,11 +627,30 @@ Start API:
 dotnet run --project src/Host/GenerateDocService.Api
 ```
 
+The API listens on `https://localhost:7025` and `http://localhost:5287` (see `Properties/launchSettings.json`).
+
 Run sample client:
 
 ```powershell
-dotnet run --project src/Clients/GenerateDocService.SampleClient -- https://localhost:7001
+# Interactive menu of engine examples
+dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:5287
+
+# Non-interactive: one example, every example, or just the engine list
+dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:5287 7
+dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:5287 all
+dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:5287 engines
 ```
+
+The menu covers every engine reachable over HTTP: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel`, `fop`, and two auto-selection examples that omit `engine`. Text output is printed inline; PDF and XLSX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `q` (quit).
+
+Set `GDS_SAMPLE_TOKEN` to attach a bearer token, which the Docker stack requires:
+
+```powershell
+$env:GDS_SAMPLE_TOKEN = New-GdsToken   # see "Getting a token" above
+dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:8081
+```
+
+`miniword`, `minipdf`, and the MiniExcel template path are **not** reachable over HTTP. They consume binary Office files, while the API transports `payload` and `template` as JSON strings that the host decodes with `Encoding.UTF8`, so a `.docx` or `.xlsx` cannot survive the round trip. The client states this explicitly instead of offering examples that would fail. Those engines work in-process and are covered by unit tests; making them reachable needs a base64 or multipart request contract.
 
 ## Validation
 

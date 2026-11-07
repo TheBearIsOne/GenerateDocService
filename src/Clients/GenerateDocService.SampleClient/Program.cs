@@ -1,151 +1,532 @@
-﻿using System.Net.Http.Json;
+﻿// Usage: dotnet run --project src/Clients/GenerateDocService.SampleClient -- [baseAddress] [selection]
+//
+//   baseAddress  API root, default https://localhost:7001
+//   selection    optional example id, "all", or "engines"; omit to get an interactive menu
+//
+// Set GDS_SAMPLE_TOKEN to attach a bearer token, which the Docker stack requires.
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using GenerateDocService.DocumentProcessing.Domain.Tasks;
 using GenerateDocService.DocumentProcessing.Presentation.Contracts;
 
 var baseAddress = args.Length > 0 ? args[0] : "https://localhost:7001";
+var selection = args.Length > 1 ? args[1] : null;
+var token = Environment.GetEnvironmentVariable("GDS_SAMPLE_TOKEN");
 
 using var httpClient = new HttpClient
 {
     BaseAddress = new Uri(baseAddress)
 };
 
+if (!string.IsNullOrWhiteSpace(token))
+{
+    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+}
+
 Console.WriteLine($"GenerateDocService sample client -> {baseAddress}");
+Console.WriteLine($"Bearer token: {(string.IsNullOrWhiteSpace(token) ? "not set" : "attached")}");
 Console.WriteLine();
 
+var examples = BuildExamples();
+
+if (string.Equals(selection, "engines", StringComparison.OrdinalIgnoreCase))
+{
+    await ShowEnginesAsync(httpClient);
+    return 0;
+}
+
+if (!string.IsNullOrWhiteSpace(selection))
+{
+    await ShowEnginesAsync(httpClient);
+
+    if (!string.Equals(selection, "all", StringComparison.OrdinalIgnoreCase))
+    {
+        var match = FindExample(examples, selection);
+        if (match is null)
+        {
+            Console.WriteLine($"Unknown example '{selection}'. Valid values: {string.Join(", ", examples.Select(e => e.Id))}, all, engines");
+            return 1;
+        }
+
+        await match.Run(httpClient);
+        return 0;
+    }
+
+    foreach (var example in examples)
+    {
+        await example.Run(httpClient);
+    }
+
+    return 0;
+}
+
 await ShowEnginesAsync(httpClient);
-await RunScribanScenarioAsync(httpClient);
-await RunQuestPdfScenarioAsync(httpClient);
+PrintMenu(examples);
+PrintUnreachableEngines();
+
+while (true)
+{
+    Console.Write("Select an example: ");
+    var input = Console.ReadLine();
+
+    if (input is null)
+    {
+        Console.WriteLine("No interactive input available; pass an example id as the second argument.");
+        return 0;
+    }
+
+    var choice = input.Trim();
+    if (choice.Length == 0)
+    {
+        continue;
+    }
+
+    if (string.Equals(choice, "q", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(choice, "quit", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(choice, "exit", StringComparison.OrdinalIgnoreCase))
+    {
+        return 0;
+    }
+
+    if (string.Equals(choice, "e", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(choice, "engines", StringComparison.OrdinalIgnoreCase))
+    {
+        await ShowEnginesAsync(httpClient);
+        continue;
+    }
+
+    if (string.Equals(choice, "m", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(choice, "menu", StringComparison.OrdinalIgnoreCase))
+    {
+        PrintMenu(examples);
+        continue;
+    }
+
+    if (string.Equals(choice, "all", StringComparison.OrdinalIgnoreCase)
+        || choice == "0")
+    {
+        foreach (var example in examples)
+        {
+            await example.Run(httpClient);
+        }
+
+        continue;
+    }
+
+    var selected = FindExample(examples, choice);
+    if (selected is null)
+    {
+        Console.WriteLine($"Unknown choice '{choice}'. Type a number, 'all', 'engines', or 'q'.");
+        Console.WriteLine();
+        continue;
+    }
+
+    await selected.Run(httpClient);
+}
+
+static List<EngineExample> BuildExamples()
+{
+    const string customerPayload = """{"document":"hello","customer":{"name":"Ada Lovelace"}}""";
+
+    return
+    [
+        new EngineExample(
+            "1",
+            "fake",
+            "json -> txt",
+            "Echoes the request metadata and payload back as text",
+            client => RunSyncAsync(client, TextRequest("fake", "json", "txt", null, customerPayload, null), "fake")),
+
+        new EngineExample(
+            "2",
+            "scriban",
+            "json -> txt",
+            "Template rendering, then the full async submit/poll/download flow",
+            async client =>
+            {
+                var request = TextRequest(
+                    "scriban", "json", "txt", "scriban", customerPayload,
+                    "Document: {{ document }} for {{ customer.name }}");
+
+                await RunSyncAsync(client, request, "scriban text");
+                await RunAsyncFlowAsync(client, request, "scriban text");
+            }),
+
+        new EngineExample(
+            "3",
+            "scriban",
+            "json -> html",
+            "Renders an HTML fragment from the same JSON payload",
+            client => RunSyncAsync(
+                client,
+                TextRequest(
+                    "scriban", "json", "html", "scriban", customerPayload,
+                    "<h1>{{ document }}</h1><p>Customer: {{ customer.name }}</p>"),
+                "scriban html")),
+
+        new EngineExample(
+            "4",
+            "scriban",
+            "json -> md",
+            "Renders Markdown from the same JSON payload",
+            client => RunSyncAsync(
+                client,
+                TextRequest(
+                    "scriban", "json", "md", "scriban", customerPayload,
+                    "# {{ document }}\n\nCustomer: **{{ customer.name }}**"),
+                "scriban markdown")),
+
+        new EngineExample(
+            "5",
+            "dotliquid",
+            "json -> txt",
+            "Liquid syntax rendering of the same payload",
+            client => RunSyncAsync(
+                client,
+                TextRequest(
+                    "dotliquid", "json", "txt", "liquid", customerPayload,
+                    "Document: {{ document }} for {{ customer.name }}"),
+                "dotliquid text")),
+
+        new EngineExample(
+            "6",
+            "questpdf",
+            "json -> pdf",
+            "Builds a PDF document from JSON, saved to the output folder",
+            client => RunSyncAsync(
+                client,
+                TextRequest(
+                    "questpdf", "json", "pdf", null,
+                    """{"title":"Quarterly Report","document":"Revenue growth is positive"}""",
+                    null),
+                "questpdf")),
+
+        new EngineExample(
+            "7",
+            "miniexcel",
+            "json -> xlsx",
+            "Table path: a JSON array becomes a worksheet, saved to the output folder",
+            client => RunSyncAsync(
+                client,
+                TextRequest(
+                    "miniexcel", "json", "xlsx", null,
+                    """[{"Name":"Alice","Age":30,"City":"London"},{"Name":"Bob","Age":25,"City":"Paris"}]""",
+                    null),
+                "miniexcel table")),
+
+        new EngineExample(
+            "8",
+            "fop",
+            "xsl-fo -> pdf",
+            "Calls the external FOP converter, so it needs that stack running",
+            client => RunSyncAsync(client, TextRequest("fop", "xsl-fo", "pdf", null, FopExample.XslFoPayload, null), "fop")),
+
+        new EngineExample(
+            "9",
+            "(auto)",
+            "json -> txt",
+            "Omits the engine so the API picks the highest-priority match",
+            client => RunSyncAsync(
+                client,
+                TextRequest(
+                    null, "json", "txt", "scriban", customerPayload,
+                    "Document: {{ document }} for {{ customer.name }}"),
+                "auto-selected engine")),
+
+        new EngineExample(
+            "10",
+            "(auto)",
+            "json -> pdf",
+            "Auto-selection resolving to questpdf for a PDF output",
+            client => RunSyncAsync(
+                client,
+                TextRequest(
+                    null, "json", "pdf", null,
+                    """{"title":"Auto-selected PDF","document":"Chosen by capability and priority"}""",
+                    null),
+                "auto-selected pdf"))
+    ];
+}
+
+static GenerateDocumentHttpRequest TextRequest(
+    string? engine,
+    string inputFormat,
+    string outputFormat,
+    string? templateFormat,
+    string payload,
+    string? template)
+    => new(
+        RequestId: Guid.NewGuid().ToString("N"),
+        Engine: engine,
+        InputFormat: inputFormat,
+        OutputFormat: outputFormat,
+        TemplateFormat: templateFormat,
+        Payload: payload,
+        Template: template,
+        Metadata: new Dictionary<string, string>
+        {
+            ["client"] = "sample"
+        });
+
+static EngineExample? FindExample(List<EngineExample> examples, string choice)
+    => examples.FirstOrDefault(example =>
+        string.Equals(example.Id, choice, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(example.Engine, choice, StringComparison.OrdinalIgnoreCase));
 
 static async Task ShowEnginesAsync(HttpClient httpClient)
 {
     PrintSection("Registered engines");
 
-    var response = await httpClient.GetAsync("/api/v1/engines");
-    var engines = await response.Content.ReadFromJsonAsync<DocumentEngineHttpResponse[]>();
-
-    Console.WriteLine($"Status: {(int)response.StatusCode}");
-    if (engines is null || engines.Length == 0)
+    try
     {
-        Console.WriteLine("No engines returned by the API.");
-        Console.WriteLine();
-        return;
-    }
+        var response = await httpClient.GetAsync("/api/v1/engines");
+        Console.WriteLine($"Status: {(int)response.StatusCode}");
 
-    foreach (var engine in engines)
-    {
-        Console.WriteLine($"- {engine.Name} (priority: {engine.Priority})");
-        Console.WriteLine($"  input: {string.Join(", ", engine.InputFormats)}");
-        Console.WriteLine($"  output: {string.Join(", ", engine.OutputFormats)}");
-        Console.WriteLine($"  templates: {string.Join(", ", engine.TemplateFormats)}");
-    }
-
-    Console.WriteLine();
-}
-
-static async Task RunScribanScenarioAsync(HttpClient httpClient)
-{
-    PrintSection("Scriban engine demo");
-
-    var request = new GenerateDocumentHttpRequest(
-        RequestId: Guid.NewGuid().ToString("N"),
-        Engine: "scriban",
-        InputFormat: "json",
-        OutputFormat: "txt",
-        TemplateFormat: "scriban",
-        Payload: "{\"document\":\"hello\",\"customer\":{\"name\":\"Ada Lovelace\"}}",
-        Template: "Document: {{ document }} for {{ customer.name }}",
-        Metadata: new Dictionary<string, string>
+        if (!response.IsSuccessStatusCode)
         {
-            ["client"] = "sample",
-            ["scenario"] = "scriban-sync-async"
-        });
+            await PrintBodyAsync(response);
+            Console.WriteLine();
+            return;
+        }
 
-    var asyncResponse = await httpClient.PostAsJsonAsync("/api/v1/documents/async", request);
-    var asyncPayload = await asyncResponse.Content.ReadFromJsonAsync<TaskStatusHttpResponse>();
-    Console.WriteLine($"Async submit status: {(int)asyncResponse.StatusCode}");
-    if (asyncPayload is null)
-    {
-        Console.WriteLine("Async payload was empty.");
-    }
-    else
-    {
-        Console.WriteLine($"TaskId: {asyncPayload.TaskId}");
-        Console.WriteLine($"Initial status: {asyncPayload.Status}");
-
-        var completed = await WaitForCompletionAsync(httpClient, asyncPayload.TaskId);
-        Console.WriteLine($"Completed status: {completed.Status}");
-        Console.WriteLine($"Result file: {completed.ResultFileName}");
-
-        if (!string.IsNullOrWhiteSpace(completed.DownloadUrl))
+        var engines = await response.Content.ReadFromJsonAsync<DocumentEngineHttpResponse[]>();
+        if (engines is null || engines.Length == 0)
         {
-            var downloadResponse = await httpClient.GetAsync(completed.DownloadUrl);
-            var downloadedContent = await downloadResponse.Content.ReadAsStringAsync();
-            Console.WriteLine($"Async download status: {(int)downloadResponse.StatusCode}");
-            Console.WriteLine($"Async content: {downloadedContent}");
+            Console.WriteLine("No engines returned by the API.");
+            Console.WriteLine();
+            return;
+        }
+
+        foreach (var engine in engines.OrderByDescending(e => e.Priority))
+        {
+            Console.WriteLine($"- {engine.Name} (priority: {engine.Priority})");
+            Console.WriteLine($"  input: {string.Join(", ", engine.InputFormats)}");
+            Console.WriteLine($"  output: {string.Join(", ", engine.OutputFormats)}");
+            Console.WriteLine($"  templates: {(engine.TemplateFormats.Count == 0 ? "(none)" : string.Join(", ", engine.TemplateFormats))}");
         }
     }
+    catch (HttpRequestException exception)
+    {
+        Console.WriteLine($"Could not reach the API: {exception.Message}");
+    }
 
-    Console.WriteLine();
-
-    var syncResponse = await httpClient.PostAsJsonAsync("/api/v1/documents/sync", request);
-    var syncContent = await syncResponse.Content.ReadAsStringAsync();
-    Console.WriteLine($"Sync status: {(int)syncResponse.StatusCode}");
-    Console.WriteLine($"Sync content: {syncContent}");
     Console.WriteLine();
 }
 
-static async Task RunQuestPdfScenarioAsync(HttpClient httpClient)
+static async Task RunSyncAsync(HttpClient httpClient, GenerateDocumentHttpRequest request, string scenario)
 {
-    PrintSection("QuestPDF engine demo");
+    PrintSection($"{scenario} (sync)");
+    Console.WriteLine($"POST /api/v1/documents/sync  engine={request.Engine ?? "(auto)"}  {request.InputFormat} -> {request.OutputFormat}");
 
-    var request = new GenerateDocumentHttpRequest(
-        RequestId: Guid.NewGuid().ToString("N"),
-        Engine: "questpdf",
-        InputFormat: "json",
-        OutputFormat: "pdf",
-        TemplateFormat: null,
-        Payload: "{\"title\":\"Quarterly Report\",\"document\":\"Revenue growth is positive\"}",
-        Template: null,
-        Metadata: new Dictionary<string, string>
-        {
-            ["client"] = "sample",
-            ["scenario"] = "questpdf-sync"
-        });
-
-    var syncResponse = await httpClient.PostAsJsonAsync("/api/v1/documents/sync", request);
-    Console.WriteLine($"Sync status: {(int)syncResponse.StatusCode}");
-
-    var bytes = await syncResponse.Content.ReadAsByteArrayAsync();
-    Console.WriteLine($"PDF bytes: {bytes.Length}");
-    if (bytes.Length >= 4)
+    try
     {
-        Console.WriteLine($"PDF header: {System.Text.Encoding.ASCII.GetString(bytes, 0, 4)}");
+        var response = await httpClient.PostAsJsonAsync("/api/v1/documents/sync", request);
+        Console.WriteLine($"Status: {(int)response.StatusCode}");
+
+        if (!response.IsSuccessStatusCode)
+        {
+            await PrintBodyAsync(response);
+            Console.WriteLine();
+            return;
+        }
+
+        await ReportContentAsync(response, $"document.{request.OutputFormat}");
+    }
+    catch (HttpRequestException exception)
+    {
+        Console.WriteLine($"Request failed: {exception.Message}");
     }
 
-    var outputDirectory = Path.Combine(AppContext.BaseDirectory, "output");
-    Directory.CreateDirectory(outputDirectory);
-    var outputPath = Path.Combine(outputDirectory, "questpdf-sample.pdf");
-    await File.WriteAllBytesAsync(outputPath, bytes);
-    Console.WriteLine($"Saved PDF to: {outputPath}");
+    Console.WriteLine();
+}
+
+static async Task RunAsyncFlowAsync(HttpClient httpClient, GenerateDocumentHttpRequest request, string scenario)
+{
+    PrintSection($"{scenario} (async)");
+    Console.WriteLine($"POST /api/v1/documents/async  engine={request.Engine ?? "(auto)"}  {request.InputFormat} -> {request.OutputFormat}");
+
+    try
+    {
+        var submit = await httpClient.PostAsJsonAsync("/api/v1/documents/async", request);
+        Console.WriteLine($"Submit status: {(int)submit.StatusCode}");
+
+        if (!submit.IsSuccessStatusCode)
+        {
+            await PrintBodyAsync(submit);
+            Console.WriteLine();
+            return;
+        }
+
+        var accepted = await submit.Content.ReadFromJsonAsync<TaskStatusHttpResponse>();
+        if (accepted is null)
+        {
+            Console.WriteLine("Async payload was empty.");
+            Console.WriteLine();
+            return;
+        }
+
+        Console.WriteLine($"TaskId: {accepted.TaskId}");
+        Console.WriteLine($"Initial status: {accepted.Status}");
+
+        var final = await WaitForCompletionAsync(httpClient, accepted.TaskId);
+        Console.WriteLine($"Final status: {final.Status}");
+
+        if (final.Status == GenerationTaskStatus.Failed)
+        {
+            Console.WriteLine($"Error: {final.Error}");
+            Console.WriteLine();
+            return;
+        }
+
+        Console.WriteLine($"Result file: {final.ResultFileName}");
+
+        if (string.IsNullOrWhiteSpace(final.DownloadUrl))
+        {
+            Console.WriteLine("No download URL was returned.");
+            Console.WriteLine();
+            return;
+        }
+
+        var download = await httpClient.GetAsync(final.DownloadUrl);
+        Console.WriteLine($"Download status: {(int)download.StatusCode}");
+
+        if (!download.IsSuccessStatusCode)
+        {
+            await PrintBodyAsync(download);
+            Console.WriteLine();
+            return;
+        }
+
+        await ReportContentAsync(download, final.ResultFileName ?? $"document.{request.OutputFormat}");
+    }
+    catch (HttpRequestException exception)
+    {
+        Console.WriteLine($"Request failed: {exception.Message}");
+    }
+
     Console.WriteLine();
 }
 
 static async Task<TaskStatusHttpResponse> WaitForCompletionAsync(HttpClient httpClient, string taskId)
 {
-    for (var attempt = 0; attempt < 20; attempt++)
+    // Generation may retry transient faults before settling, so allow more than the minimum.
+    TaskStatusHttpResponse? last = null;
+
+    for (var attempt = 0; attempt < 120; attempt++)
     {
         var response = await httpClient.GetAsync($"/api/v1/tasks/{taskId}");
-        var payload = await response.Content.ReadFromJsonAsync<TaskStatusHttpResponse>();
-
-        if (payload is not null && payload.Status is not GenerateDocService.DocumentProcessing.Domain.Tasks.GenerationTaskStatus.Queued
-            && payload.Status is not GenerateDocService.DocumentProcessing.Domain.Tasks.GenerationTaskStatus.Processing)
+        if (response.IsSuccessStatusCode)
         {
-            return payload;
+            last = await response.Content.ReadFromJsonAsync<TaskStatusHttpResponse>();
+            if (last is not null
+                && last.Status is not GenerationTaskStatus.Queued and not GenerationTaskStatus.Processing)
+            {
+                return last;
+            }
         }
 
-        await Task.Delay(100);
+        await Task.Delay(250);
     }
 
-    throw new TimeoutException($"Task '{taskId}' did not complete in time.");
+    return last ?? throw new TimeoutException($"Task '{taskId}' did not report a status in time.");
+}
+
+static async Task ReportContentAsync(HttpResponseMessage response, string fallbackFileName)
+{
+    var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+    var bytes = await response.Content.ReadAsByteArrayAsync();
+
+    Console.WriteLine($"Content-Type: {contentType}  bytes: {bytes.Length}");
+
+    if (IsTextual(contentType))
+    {
+        Console.WriteLine();
+        Console.WriteLine(Encoding.UTF8.GetString(bytes));
+        return;
+    }
+
+    var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+        ?? response.Content.Headers.ContentDisposition?.FileName
+        ?? fallbackFileName;
+
+    var path = SaveOutput(fileName.Trim('"'), bytes);
+    Console.WriteLine($"Saved to: {path}");
+
+    if (bytes.Length >= 4)
+    {
+        Console.WriteLine($"Header bytes: {BitConverter.ToString(bytes, 0, 4)}");
+    }
+}
+
+static bool IsTextual(string contentType)
+{
+    // Office media types embed "xml" in their vendor tree, for example
+    // application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, so a substring search
+    // would dump a binary workbook to the console. Match precisely instead.
+    if (contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    if (contentType.EndsWith("+json", StringComparison.OrdinalIgnoreCase)
+        || contentType.EndsWith("+xml", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    return contentType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+        || contentType.Equals("application/xml", StringComparison.OrdinalIgnoreCase);
+}
+
+static string SaveOutput(string fileName, byte[] bytes)
+{
+    var directory = Path.Combine(AppContext.BaseDirectory, "output");
+    Directory.CreateDirectory(directory);
+
+    var safeName = string.Concat(fileName.Split(Path.GetInvalidFileNameChars()));
+    var path = Path.Combine(directory, safeName);
+
+    File.WriteAllBytes(path, bytes);
+
+    return path;
+}
+
+static async Task PrintBodyAsync(HttpResponseMessage response)
+{
+    var body = await response.Content.ReadAsStringAsync();
+    if (!string.IsNullOrWhiteSpace(body))
+    {
+        Console.WriteLine($"Response: {body}");
+    }
+}
+
+static void PrintMenu(List<EngineExample> examples)
+{
+    PrintSection("Examples");
+
+    foreach (var example in examples)
+    {
+        Console.WriteLine($"  {example.Id,2}. {example.Engine,-11} {example.Title,-14} {example.Detail}");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("  0 or all  run every example      e  list engines      m  redisplay menu      q  quit");
+    Console.WriteLine();
+}
+
+static void PrintUnreachableEngines()
+{
+    PrintSection("Engines this client cannot drive");
+
+    Console.WriteLine("The API carries payload and template as JSON strings that the host decodes with");
+    Console.WriteLine("Encoding.UTF8, so binary Office files cannot survive the round trip. These modes");
+    Console.WriteLine("work in-process but have no HTTP representation yet:");
+    Console.WriteLine();
+    Console.WriteLine("  - miniword                 json -> docx  (needs a binary .docx template)");
+    Console.WriteLine("  - minipdf                  docx/xlsx -> pdf  (needs binary source bytes)");
+    Console.WriteLine("  - miniexcel template path  json -> xlsx  (needs a binary .xlsx template)");
+    Console.WriteLine();
 }
 
 static void PrintSection(string title)
@@ -153,3 +534,30 @@ static void PrintSection(string title)
     Console.WriteLine(title);
     Console.WriteLine(new string('-', title.Length));
 }
+
+internal static class FopExample
+{
+    internal const string XslFoPayload = """
+        <fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format">
+          <fo:layout-master-set>
+            <fo:simple-page-master master-name="default" page-height="11in" page-width="8.5in" margin="0.75in">
+              <fo:region-body/>
+            </fo:simple-page-master>
+          </fo:layout-master-set>
+          <fo:page-sequence master-reference="default">
+            <fo:flow flow-name="xsl-region-body">
+              <fo:block font-size="18pt" font-weight="bold">GenerateDocService</fo:block>
+              <fo:block font-size="12pt" space-before="12pt">Rendered by Apache FOP through the external converter.</fo:block>
+              <fo:block font-size="10pt" space-before="12pt">Submitted by the sample client.</fo:block>
+            </fo:flow>
+          </fo:page-sequence>
+        </fo:root>
+        """;
+}
+
+internal sealed record EngineExample(
+    string Id,
+    string Engine,
+    string Title,
+    string Detail,
+    Func<HttpClient, Task> Run);
