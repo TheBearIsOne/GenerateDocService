@@ -251,9 +251,26 @@ static GenerateDocumentRequest ToApplicationRequest(GenerateDocumentHttpRequest 
         request.InputFormat,
         request.OutputFormat,
         request.TemplateFormat,
-        Encoding.UTF8.GetBytes(request.Payload),
-        request.Template is null ? null : Encoding.UTF8.GetBytes(request.Template),
+        ResolvePayloadBytes(request),
+        ResolveTemplateBytes(request),
         metadata);
+}
+
+// The validator has already rejected malformed base64 and any request that sets both the text and
+// the base64 field, so decoding cannot throw here.
+static byte[] ResolvePayloadBytes(GenerateDocumentHttpRequest request)
+    => !string.IsNullOrEmpty(request.PayloadBase64)
+        ? Convert.FromBase64String(request.PayloadBase64)
+        : Encoding.UTF8.GetBytes(request.Payload ?? string.Empty);
+
+static byte[]? ResolveTemplateBytes(GenerateDocumentHttpRequest request)
+{
+    if (!string.IsNullOrEmpty(request.TemplateBase64))
+    {
+        return Convert.FromBase64String(request.TemplateBase64);
+    }
+
+    return request.Template is null ? null : Encoding.UTF8.GetBytes(request.Template);
 }
 
 static string? BuildDownloadUrl(HttpContext httpContext, TaskStatusResponse response)

@@ -37,9 +37,23 @@ public sealed class GenerateDocumentRequestValidator(DocumentProcessingValidatio
             errors.Add(new ValidationError("outputFormat", "Output format is required."));
         }
 
-        if (string.IsNullOrEmpty(request.Payload))
+        var hasTextPayload = !string.IsNullOrEmpty(request.Payload);
+        var hasBinaryPayload = !string.IsNullOrEmpty(request.PayloadBase64);
+
+        if (hasTextPayload && hasBinaryPayload)
         {
-            errors.Add(new ValidationError("payload", "Payload is required."));
+            errors.Add(new ValidationError("payload", "Provide either 'payload' or 'payloadBase64', not both."));
+        }
+        else if (!hasTextPayload && !hasBinaryPayload)
+        {
+            errors.Add(new ValidationError(
+                "payload",
+                "Payload is required. Set 'payload' for text input or 'payloadBase64' for binary input."));
+        }
+
+        if (!string.IsNullOrEmpty(request.Template) && !string.IsNullOrEmpty(request.TemplateBase64))
+        {
+            errors.Add(new ValidationError("template", "Provide either 'template' or 'templateBase64', not both."));
         }
     }
 
@@ -55,6 +69,8 @@ public sealed class GenerateDocumentRequestValidator(DocumentProcessingValidatio
                     $"Payload size ({FormatBytes(payloadSize)}) exceeds maximum allowed size ({FormatBytes(options.MaxPayloadSizeBytes)})."));
             }
         }
+
+        ValidateBase64Size(request.PayloadBase64, "payload", options.MaxPayloadSizeBytes, errors);
     }
 
     private void ValidateTemplateSize(GenerateDocumentHttpRequest request, List<ValidationError> errors)
@@ -69,6 +85,93 @@ public sealed class GenerateDocumentRequestValidator(DocumentProcessingValidatio
                     $"Template size ({FormatBytes(templateSize)}) exceeds maximum allowed size ({FormatBytes(options.MaxTemplateSizeBytes)})."));
             }
         }
+
+        ValidateBase64Size(request.TemplateBase64, "template", options.MaxTemplateSizeBytes, errors);
+    }
+
+    private void ValidateBase64Size(string? value, string field, int maxBytes, List<ValidationError> errors)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        if (!IsWellFormedBase64(value))
+        {
+            errors.Add(new ValidationError(field, $"'{field}Base64' is not well-formed base64."));
+            return;
+        }
+
+        var decodedSize = Base64ByteLength(value);
+        if (decodedSize > maxBytes)
+        {
+            errors.Add(new ValidationError(
+                field,
+                $"Decoded '{field}Base64' size ({FormatBytes(decodedSize)}) exceeds maximum allowed size ({FormatBytes(maxBytes)})."));
+        }
+    }
+
+    /// <summary>
+    /// Strict syntactic check. Whitespace is rejected even though <see cref="Convert.FromBase64String"/>
+    /// tolerates it, so the decoded length can be derived from the encoded length exactly and the
+    /// payload is decoded once, in the mapper.
+    /// </summary>
+    private static bool IsWellFormedBase64(string value)
+    {
+        if (value.Length == 0 || value.Length % 4 != 0)
+        {
+            return false;
+        }
+
+        var firstPadding = value.IndexOf('=');
+        if (firstPadding < 0)
+        {
+            return IsBase64Alphabet(value, 0, value.Length);
+        }
+
+        if (value.Length - firstPadding > 2)
+        {
+            return false;
+        }
+
+        for (var i = firstPadding; i < value.Length; i++)
+        {
+            if (value[i] != '=')
+            {
+                return false;
+            }
+        }
+
+        return IsBase64Alphabet(value, 0, firstPadding);
+    }
+
+    private static bool IsBase64Alphabet(string value, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+        {
+            var c = value[i];
+            var valid = (c >= 'A' && c <= 'Z')
+                || (c >= 'a' && c <= 'z')
+                || (c >= '0' && c <= '9')
+                || c == '+'
+                || c == '/';
+
+            if (!valid)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static long Base64ByteLength(string value)
+    {
+        var padding = value.EndsWith("==", StringComparison.Ordinal) ? 2
+            : value.EndsWith('=') ? 1
+            : 0;
+
+        return (long)value.Length / 4 * 3 - padding;
     }
 
     private void ValidateMetadata(GenerateDocumentHttpRequest request, List<ValidationError> errors)

@@ -329,6 +329,11 @@ API endpoints now enforce configurable guardrails to prevent resource abuse:
 - **Metadata**: max 50 entries, key length 128, value length 1024
 - **Format/engine name lengths**: default 64 characters
 - **Request ID length**: default 64 characters
+- **Payload source**: exactly one of `payload` (text) or `payloadBase64` (binary) is required
+- **Template source**: at most one of `template` or `templateBase64`
+- **Base64 form**: strict — the standard alphabet, length a multiple of four, at most two trailing `=`, and no embedded whitespace
+
+Size limits are applied to the **decoded** byte count for the base64 fields, so encoding cannot be used to exceed a limit. The validator measures that length arithmetically rather than decoding, so a request body is decoded once, in the mapper.
 
 Invalid requests return `400 Bad Request` with field-level error details.
 
@@ -470,6 +475,21 @@ Example request body:
 }
 ```
 
+Binary payloads and templates use `payloadBase64` and `templateBase64` instead of the text fields. This is what makes `miniword`, `minipdf`, and the MiniExcel template path callable over HTTP, since a `.docx` or `.xlsx` cannot survive a UTF-8 string round trip:
+
+```json
+{
+  "engine": "miniword",
+  "inputFormat": "json",
+  "outputFormat": "docx",
+  "templateFormat": "docx",
+  "payload": "{\"Name\":\"Ada Lovelace\",\"Score\":99}",
+  "templateBase64": "UEsDBBQAAAAIAA...(base64 of the .docx template)...AA=="
+}
+```
+
+Each pair is mutually exclusive: set `payload` **or** `payloadBase64`, and `template` **or** `templateBase64`. Sending both, or neither payload field, returns `400`. Binary input flows through the async pipeline unchanged, because `GenerateDocumentRequested` already carries `byte[]`.
+
 `engine` can be omitted for auto-selection. In that case the application chooses the highest-priority registered engine that can handle the requested `inputFormat`, `outputFormat`, and `templateFormat`.
 
 Example async status response:
@@ -530,7 +550,8 @@ Integration tests currently cover:
 - correlation id header propagation through HTTP responses;
 - JWT authentication and role-based authorization: 401 without a token, 403 for a role that does not satisfy the policy, 200 for a valid role, rejection of expired and wrongly-signed tokens, anonymous health probes, and startup failure when the signing key is shorter than 32 characters;
 - the PostgreSQL task repository and the startup migration path, against a real container;
-- a RabbitMQ async round-trip proving the consumer's receive endpoint matches `DocumentProcessing:Messaging:QueueName`.
+- a RabbitMQ async round-trip proving the consumer's receive endpoint matches `DocumentProcessing:Messaging:QueueName`;
+- binary transport for `miniword`, `minipdf`, and the MiniExcel template path, including a base64 `.docx` template surviving the async pipeline and the base64 validation rejections.
 
 Tests tagged `Category=RequiresDocker` start PostgreSQL and RabbitMQ containers through Testcontainers. They run automatically when a Docker daemon is reachable and skip cleanly when it is not, so a plain `dotnet test` works either way. Run only those with:
 
@@ -641,7 +662,7 @@ dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://local
 dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:5287 engines
 ```
 
-The menu covers every engine reachable over HTTP: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel`, `fop`, and two auto-selection examples that omit `engine`. Text output is printed inline; PDF and XLSX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `q` (quit).
+The menu covers all eight engines across thirteen examples: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel` (table *and* template paths), `miniword`, `minipdf`, `fop`, and two auto-selection examples that omit `engine`. Text output is printed inline; PDF, XLSX and DOCX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `q` (quit).
 
 Set `GDS_SAMPLE_TOKEN` to attach a bearer token, which the Docker stack requires:
 
@@ -650,7 +671,7 @@ $env:GDS_SAMPLE_TOKEN = New-GdsToken   # see "Getting a token" above
 dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:8081
 ```
 
-`miniword`, `minipdf`, and the MiniExcel template path are **not** reachable over HTTP. They consume binary Office files, while the API transports `payload` and `template` as JSON strings that the host decodes with `Encoding.UTF8`, so a `.docx` or `.xlsx` cannot survive the round trip. The client states this explicitly instead of offering examples that would fail. Those engines work in-process and are covered by unit tests; making them reachable needs a base64 or multipart request contract.
+The binary examples build their `.docx` and `.xlsx` fixtures in memory (`OfficeFixtures`), so the client is self-contained and needs no files on disk. The `minipdf` example chains two calls: it generates a workbook through `miniexcel` first, then feeds those bytes back as a base64 payload.
 
 ## Validation
 

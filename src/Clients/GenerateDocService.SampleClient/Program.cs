@@ -1,16 +1,17 @@
 ﻿// Usage: dotnet run --project src/Clients/GenerateDocService.SampleClient -- [baseAddress] [selection]
 //
-//   baseAddress  API root, default https://localhost:7001
+//   baseAddress  API root, default http://localhost:5287
 //   selection    optional example id, "all", or "engines"; omit to get an interactive menu
 //
 // Set GDS_SAMPLE_TOKEN to attach a bearer token, which the Docker stack requires.
+using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using GenerateDocService.DocumentProcessing.Domain.Tasks;
 using GenerateDocService.DocumentProcessing.Presentation.Contracts;
 
-var baseAddress = args.Length > 0 ? args[0] : "https://localhost:7001";
+var baseAddress = args.Length > 0 ? args[0] : "http://localhost:5287";
 var selection = args.Length > 1 ? args[1] : null;
 var token = Environment.GetEnvironmentVariable("GDS_SAMPLE_TOKEN");
 
@@ -63,7 +64,6 @@ if (!string.IsNullOrWhiteSpace(selection))
 
 await ShowEnginesAsync(httpClient);
 PrintMenu(examples);
-PrintUnreachableEngines();
 
 while (true)
 {
@@ -245,9 +245,86 @@ static List<EngineExample> BuildExamples()
                     null, "json", "pdf", null,
                     """{"title":"Auto-selected PDF","document":"Chosen by capability and priority"}""",
                     null),
-                "auto-selected pdf"))
+                "auto-selected pdf")),
+
+        new EngineExample(
+            "11",
+            "miniword",
+            "json -> docx",
+            "Populates a binary .docx template sent as base64",
+            client => RunSyncAsync(
+                client,
+                BinaryRequest(
+                    "miniword", "json", "docx", "docx",
+                    payload: """{"Name":"Ada Lovelace","Score":99}""",
+                    templateBase64: Convert.ToBase64String(
+                        OfficeFixtures.CreateDocxTemplate("Student: {{Name}}, Score: {{Score}}"))),
+                "miniword")),
+
+        new EngineExample(
+            "12",
+            "miniexcel",
+            "json -> xlsx",
+            "Template path: populates a binary .xlsx template sent as base64",
+            client => RunSyncAsync(
+                client,
+                BinaryRequest(
+                    "miniexcel", "json", "xlsx", "xlsx",
+                    payload: """{"title":"Invoice INV-2026-001","customer":"Ada Lovelace"}""",
+                    templateBase64: Convert.ToBase64String(
+                        OfficeFixtures.CreateXlsxTemplate("{{title}}", "Customer: {{customer}}"))),
+                "miniexcel template")),
+
+        new EngineExample(
+            "13",
+            "minipdf",
+            "xlsx -> pdf",
+            "Chains a generated workbook into PDF conversion through a binary payload",
+            async client =>
+            {
+                var workbook = await PostForBytesAsync(
+                    client,
+                    TextRequest(
+                        "miniexcel", "json", "xlsx", null,
+                        """[{"Name":"Alice","Age":30},{"Name":"Bob","Age":25}]""",
+                        null),
+                    "minipdf source workbook");
+
+                if (workbook is null)
+                {
+                    return;
+                }
+
+                await RunSyncAsync(
+                    client,
+                    BinaryRequest("minipdf", "xlsx", "pdf", null, payloadBase64: Convert.ToBase64String(workbook)),
+                    "minipdf");
+            })
     ];
 }
+
+static GenerateDocumentHttpRequest BinaryRequest(
+    string? engine,
+    string inputFormat,
+    string outputFormat,
+    string? templateFormat,
+    string? payload = null,
+    string? payloadBase64 = null,
+    string? templateBase64 = null)
+    => new(
+        RequestId: Guid.NewGuid().ToString("N"),
+        Engine: engine,
+        InputFormat: inputFormat,
+        OutputFormat: outputFormat,
+        TemplateFormat: templateFormat,
+        Payload: payload,
+        Template: null,
+        Metadata: new Dictionary<string, string>
+        {
+            ["client"] = "sample"
+        },
+        PayloadBase64: payloadBase64,
+        TemplateBase64: templateBase64);
 
 static GenerateDocumentHttpRequest TextRequest(
     string? engine,
@@ -339,6 +416,37 @@ static async Task RunSyncAsync(HttpClient httpClient, GenerateDocumentHttpReques
     }
 
     Console.WriteLine();
+}
+
+static async Task<byte[]?> PostForBytesAsync(HttpClient httpClient, GenerateDocumentHttpRequest request, string scenario)
+{
+    PrintSection($"{scenario} (sync)");
+    Console.WriteLine($"POST /api/v1/documents/sync  engine={request.Engine ?? "(auto)"}  {request.InputFormat} -> {request.OutputFormat}");
+
+    try
+    {
+        var response = await httpClient.PostAsJsonAsync("/api/v1/documents/sync", request);
+        Console.WriteLine($"Status: {(int)response.StatusCode}");
+
+        if (!response.IsSuccessStatusCode)
+        {
+            await PrintBodyAsync(response);
+            Console.WriteLine();
+            return null;
+        }
+
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        Console.WriteLine($"Received {bytes.Length} bytes");
+        Console.WriteLine();
+
+        return bytes;
+    }
+    catch (HttpRequestException exception)
+    {
+        Console.WriteLine($"Request failed: {exception.Message}");
+        Console.WriteLine();
+        return null;
+    }
 }
 
 static async Task RunAsyncFlowAsync(HttpClient httpClient, GenerateDocumentHttpRequest request, string scenario)
@@ -515,20 +623,6 @@ static void PrintMenu(List<EngineExample> examples)
     Console.WriteLine();
 }
 
-static void PrintUnreachableEngines()
-{
-    PrintSection("Engines this client cannot drive");
-
-    Console.WriteLine("The API carries payload and template as JSON strings that the host decodes with");
-    Console.WriteLine("Encoding.UTF8, so binary Office files cannot survive the round trip. These modes");
-    Console.WriteLine("work in-process but have no HTTP representation yet:");
-    Console.WriteLine();
-    Console.WriteLine("  - miniword                 json -> docx  (needs a binary .docx template)");
-    Console.WriteLine("  - minipdf                  docx/xlsx -> pdf  (needs binary source bytes)");
-    Console.WriteLine("  - miniexcel template path  json -> xlsx  (needs a binary .xlsx template)");
-    Console.WriteLine();
-}
-
 static void PrintSection(string title)
 {
     Console.WriteLine(title);
@@ -561,3 +655,104 @@ internal sealed record EngineExample(
     string Title,
     string Detail,
     Func<HttpClient, Task> Run);
+
+/// <summary>
+/// Builds the minimal Office packages the template-driven engines need, so the binary examples are
+/// self-contained and do not depend on fixture files on disk.
+/// </summary>
+internal static class OfficeFixtures
+{
+    internal static byte[] CreateDocxTemplate(string textContent)
+    {
+        using var stream = new MemoryStream();
+
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            WriteEntry(archive, "[Content_Types].xml", """
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+                <Default Extension="xml" ContentType="application/xml"/>
+                <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+                </Types>
+                """);
+            WriteEntry(archive, "_rels/.rels", """
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+                </Relationships>
+                """);
+            WriteEntry(archive, "word/document.xml", $"""
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                <w:body><w:p><w:r><w:t xml:space="preserve">{Escape(textContent)}</w:t></w:r></w:p></w:body>
+                </w:document>
+                """);
+            WriteEntry(archive, "word/_rels/document.xml.rels", """
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                </Relationships>
+                """);
+        }
+
+        return stream.ToArray();
+    }
+
+    internal static byte[] CreateXlsxTemplate(params string[] cellValues)
+    {
+        using var stream = new MemoryStream();
+
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            WriteEntry(archive, "[Content_Types].xml", """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
+                    <Default Extension="xml" ContentType="application/xml" />
+                    <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" />
+                    <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" />
+                </Types>
+                """);
+            WriteEntry(archive, "_rels/.rels", """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml" />
+                </Relationships>
+                """);
+            WriteEntry(archive, "xl/workbook.xml", """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                    <sheets><sheet name="Invoice" sheetId="1" r:id="rId1" /></sheets>
+                </workbook>
+                """);
+            WriteEntry(archive, "xl/_rels/workbook.xml.rels", """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml" />
+                </Relationships>
+                """);
+
+            var rows = string.Join(
+                string.Empty,
+                cellValues.Select((value, index) =>
+                    $"<row r=\"{index + 1}\"><c r=\"A{index + 1}\" t=\"inlineStr\"><is><t>{Escape(value)}</t></is></c></row>"));
+
+            WriteEntry(archive, "xl/worksheets/sheet1.xml", $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                    <sheetData>{rows}</sheetData>
+                </worksheet>
+                """);
+        }
+
+        return stream.ToArray();
+    }
+
+    private static void WriteEntry(ZipArchive archive, string path, string content)
+    {
+        using var writer = new StreamWriter(archive.CreateEntry(path).Open());
+        writer.Write(content);
+    }
+
+    private static string Escape(string value) => System.Security.SecurityElement.Escape(value) ?? value;
+}
