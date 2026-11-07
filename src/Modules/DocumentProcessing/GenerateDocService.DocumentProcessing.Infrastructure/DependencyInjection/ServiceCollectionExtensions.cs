@@ -2,15 +2,19 @@ using GenerateDocService.DocumentProcessing.Application.Abstractions.Caching;
 using GenerateDocService.DocumentProcessing.Application.Abstractions.Messaging;
 using GenerateDocService.DocumentProcessing.Application.Abstractions.Storage;
 using GenerateDocService.DocumentProcessing.Application.DependencyInjection;
+using GenerateDocService.DocumentProcessing.Application.Resilience;
 using GenerateDocService.DocumentProcessing.Infrastructure.HealthChecks;
 using GenerateDocService.DocumentProcessing.Infrastructure.Engines;
 using GenerateDocService.DocumentProcessing.Infrastructure.Caching;
 using GenerateDocService.DocumentProcessing.Infrastructure.Messaging;
+using GenerateDocService.DocumentProcessing.Infrastructure.Resilience;
 using GenerateDocService.DocumentProcessing.Infrastructure.Storage;
 using GenerateDocService.DocumentProcessing.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Http.Resilience;
 using Npgsql;
+using Polly;
 using GenerateDocService.Engine.Abstractions;
 using GenerateDocService.Engine.DotLiquid;
 using GenerateDocService.Engine.Fop;
@@ -34,13 +38,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddDocumentProcessingInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddDocumentProcessingApplication();
-        var fopBaseUrl = configuration["DocumentProcessing:Fop:BaseUrl"] ?? "http://localhost:8080/";
-        if (!Uri.TryCreate(fopBaseUrl, UriKind.Absolute, out var fopBaseUri))
-        {
-            throw new InvalidOperationException("DocumentProcessing:Fop:BaseUrl must be an absolute URI.");
-        }
-
-        services.AddHttpClient(FopDocumentGenerationEngine.HttpClientName, client => client.BaseAddress = fopBaseUri);
+        services.AddDocumentProcessingResilience(configuration);
         services.AddTemplateParsers(
             typeof(ScribanTemplateParser).Assembly,
             typeof(DotLiquidTemplateParser).Assembly);
@@ -135,10 +133,58 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    private static IServiceCollection AddDocumentProcessingResilience(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.Configure<GenerationResilienceOptions>(
+            configuration.GetSection(GenerationResilienceOptions.SectionName));
+
+        var fopOptions = configuration
+            .GetSection(DocumentProcessingFopOptions.SectionName)
+            .Get<DocumentProcessingFopOptions>()
+            ?? new DocumentProcessingFopOptions();
+
+        if (!Uri.TryCreate(fopOptions.BaseUrl, UriKind.Absolute, out var fopBaseUri))
+        {
+            throw new InvalidOperationException($"{DocumentProcessingFopOptions.SectionName}:BaseUrl must be an absolute URI.");
+        }
+
+        var attemptTimeout = TimeSpan.FromSeconds(fopOptions.AttemptTimeoutSeconds);
+
+        // HttpStandardResilienceOptions validates two invariants when the pipeline is built: the
+        // breaker sampling window must cover at least two attempt timeouts, and the total request
+        // timeout must cover every attempt. Widening them here keeps a hand-edited configuration
+        // from turning the first FOP request into an OptionsValidationException.
+        var samplingDuration = TimeSpan.FromSeconds(
+            Math.Max(fopOptions.CircuitBreakerSamplingDurationSeconds, 2 * fopOptions.AttemptTimeoutSeconds));
+        var totalTimeout = TimeSpan.FromSeconds(
+            Math.Max(fopOptions.TotalTimeoutSeconds, fopOptions.AttemptTimeoutSeconds * (fopOptions.MaxRetryAttempts + 1)));
+
+        // The resilience handler owns request timeouts and sets HttpClient.Timeout to infinite itself,
+        // so no client-level timeout is configured here.
+        services.AddHttpClient(FopDocumentGenerationEngine.HttpClientName, client => client.BaseAddress = fopBaseUri)
+            .AddStandardResilienceHandler(options =>
+            {
+                options.AttemptTimeout.Timeout = attemptTimeout;
+                options.TotalRequestTimeout.Timeout = totalTimeout;
+                options.Retry.MaxRetryAttempts = fopOptions.MaxRetryAttempts;
+                options.Retry.Delay = TimeSpan.FromMilliseconds(fopOptions.RetryBaseDelayMilliseconds);
+                options.Retry.BackoffType = DelayBackoffType.Exponential;
+                options.CircuitBreaker.MinimumThroughput = fopOptions.CircuitBreakerMinimumThroughput;
+                options.CircuitBreaker.SamplingDuration = samplingDuration;
+                options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(fopOptions.CircuitBreakerBreakDurationSeconds);
+            });
+
+        return services;
+    }
+
     private static IServiceCollection AddDocumentProcessingCaching(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<DocumentProcessingCacheOptions>(
             configuration.GetSection(DocumentProcessingCacheOptions.SectionName));
+        services.Configure<Application.Services.InMemoryProviderOptions>(
+            configuration.GetSection(Application.Services.InMemoryProviderOptions.SectionName));
 
         var cacheOptions = configuration
             .GetSection(DocumentProcessingCacheOptions.SectionName)
@@ -156,6 +202,12 @@ public static class ServiceCollectionExtensions
         services.Replace(ServiceDescriptor.Singleton<ICompiledTemplateCache, RedisCompiledTemplateCache>());
         services.Replace(ServiceDescriptor.Singleton<IGeneratedDocumentCache, RedisGeneratedDocumentCache>());
         services.Replace(ServiceDescriptor.Singleton<IGenerationRequestDeduplicationStore, RedisGenerationRequestDeduplicationStore>());
+
+        // RedisTimeoutException already derives from TimeoutException, so only the connection fault
+        // needs registering for the application layer to treat it as retryable.
+        services.Replace(ServiceDescriptor.Singleton(
+            typeof(TransientFailureClassifier),
+            new TransientFailureClassifier(typeof(RedisConnectionException))));
 
         return services;
     }
@@ -264,6 +316,8 @@ public static class ServiceCollectionExtensions
             .GetSection(DocumentProcessingPersistenceOptions.SectionName)
             .Get<DocumentProcessingPersistenceOptions>()
             ?? new DocumentProcessingPersistenceOptions();
+
+        services.AddScoped<ArtifactRetentionCleaner>();
 
         if (!persistenceOptions.IsPostgreSqlProvider())
         {

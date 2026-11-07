@@ -361,9 +361,48 @@ Stored artifacts and task records are automatically cleaned up by a background s
 
 - **Completed tasks**: deleted after `RetentionDays` (default: 30 days)
 - **Failed tasks**: deleted after `FailedTaskRetentionDays` (default: 7 days)
+- **Abandoned tasks**: a task still `Processing` after `StuckProcessingTaskSeconds` (default: 1800) is moved to `Failed`, so a worker that crashed mid-generation cannot leave clients polling forever
 - **Cleanup interval**: runs every `CleanupIntervalHours` (default: 1 hour)
 
 Configure via `DocumentProcessing:Retention` in `appsettings.json`.
+
+The cleanup policy lives in `ArtifactRetentionCleaner`; `ArtifactCleanupBackgroundService` is only its scheduler.
+
+## Resilience and retries
+
+Generation failures are classified before they are treated as final.
+
+**Background processing** (`DocumentProcessing:Resilience`):
+
+- **Processing timeout**: `ProcessingTimeoutSeconds` (default: 300) bounds a single generation. Exceeding it is terminal and fails the task with an explanatory error.
+- **Bounded retry**: transient faults are retried up to `MaxAttempts` (default: 3) with exponential backoff between `InitialDelayMilliseconds` (250) and `MaxDelayMilliseconds` (5000), scaled by `BackoffMultiplier` (2.0).
+- **Classification**: `TransientFailureClassifier` treats `HttpRequestException`, `TimeoutException`, `IOException`, and `SocketException` as retryable. Cancellation is always terminal, so an expired deadline is never retried into another full attempt. When the Redis provider is enabled the classifier also learns `RedisConnectionException`.
+- `DocumentGenerationFailed` is published once, after the last attempt — not per retry.
+
+**FOP converter client** (`DocumentProcessing:Fop`):
+
+The external converter call runs through a standard resilience pipeline (timeout, retry, circuit breaker):
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `AttemptTimeoutSeconds` | 30 | Per-attempt timeout |
+| `TotalTimeoutSeconds` | 120 | Budget for the whole call including retries |
+| `MaxRetryAttempts` | 2 | Retries after the first attempt |
+| `RetryBaseDelayMilliseconds` | 1000 | Exponential backoff base |
+| `CircuitBreakerMinimumThroughput` | 10 | Failures before the breaker can open |
+| `CircuitBreakerSamplingDurationSeconds` | 60 | Breaker sampling window |
+| `CircuitBreakerBreakDurationSeconds` | 30 | How long the breaker stays open |
+
+`HttpStandardResilienceOptions` requires the sampling window to cover at least two attempt timeouts and the total budget to cover every attempt. Both are widened automatically if a hand-edited configuration violates that, so a bad value cannot turn the first FOP request into an `OptionsValidationException`.
+
+**In-memory providers** (`DocumentProcessing:InMemory`):
+
+The in-memory cache and deduplication stores are bounded so they match the Redis equivalents instead of growing for the lifetime of the process:
+
+- `GeneratedDocumentTtlMinutes` (default: 60) and `MaxCachedDocuments` (default: 1000) — the oldest entries are evicted once over capacity
+- `DeduplicationTtlMinutes` (default: 15) — without expiry, a task abandoned mid-flight would pin its fingerprint forever
+
+Set a TTL to `0` to disable expiry.
 
 ## API
 
@@ -458,6 +497,11 @@ Unit tests cover:
 - engine generation behavior;
 - correlation middleware;
 - async enqueue flow;
+- background processing retries, the processing deadline, and terminal-failure handling;
+- transient failure classification and retry backoff;
+- in-memory cache and deduplication TTL and capacity bounds;
+- artifact retention cleanup, including reaping tasks abandoned in `Processing`;
+- resilience and FOP HTTP pipeline DI registration;
 - artifact download service;
 - custom metrics helpers.
 
@@ -483,7 +527,16 @@ Integration tests currently cover:
 - task polling;
 - artifact download endpoint;
 - sync and async auto-selection when `engine` is omitted;
-- correlation id header propagation through HTTP responses.
+- correlation id header propagation through HTTP responses;
+- JWT authentication and role-based authorization: 401 without a token, 403 for a role that does not satisfy the policy, 200 for a valid role, rejection of expired and wrongly-signed tokens, anonymous health probes, and startup failure when the signing key is shorter than 32 characters;
+- the PostgreSQL task repository and the startup migration path, against a real container;
+- a RabbitMQ async round-trip proving the consumer's receive endpoint matches `DocumentProcessing:Messaging:QueueName`.
+
+Tests tagged `Category=RequiresDocker` start PostgreSQL and RabbitMQ containers through Testcontainers. They run automatically when a Docker daemon is reachable and skip cleanly when it is not, so a plain `dotnet test` works either way. Run only those with:
+
+```powershell
+dotnet test tests/Integration/GenerateDocService.Api.IntegrationTests/GenerateDocService.Api.IntegrationTests.csproj --filter "Category=RequiresDocker"
+```
 
 Run unit tests:
 

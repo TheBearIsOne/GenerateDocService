@@ -1,6 +1,3 @@
-using GenerateDocService.DocumentProcessing.Application.Abstractions.Persistence;
-using GenerateDocService.DocumentProcessing.Application.Abstractions.Storage;
-using GenerateDocService.DocumentProcessing.Domain.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -19,9 +16,10 @@ public sealed class ArtifactCleanupBackgroundService(
         var interval = TimeSpan.FromHours(options.CleanupIntervalHours);
 
         logger.LogInformation(
-            "Artifact cleanup started. Retention: {RetentionDays}d (completed), {FailedRetentionDays}d (failed). Interval: {Interval}h",
+            "Artifact cleanup started. Retention: {RetentionDays}d (completed), {FailedRetentionDays}d (failed). Stuck processing reaper: {StuckSeconds}s. Interval: {Interval}h",
             options.RetentionDays,
             options.FailedTaskRetentionDays,
+            options.StuckProcessingTaskSeconds,
             options.CleanupIntervalHours);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -29,19 +27,22 @@ public sealed class ArtifactCleanupBackgroundService(
             try
             {
                 using var scope = scopeFactory.CreateScope();
-                var taskRepository = scope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>();
-                var artifactStore = scope.ServiceProvider.GetRequiredService<IDocumentArtifactStore>();
+                var result = await scope.ServiceProvider
+                    .GetRequiredService<ArtifactRetentionCleaner>()
+                    .RunAsync(stoppingToken);
 
-                var completedCount = await CleanupCompletedTasksAsync(taskRepository, artifactStore, options.RetentionDays, stoppingToken);
-                var failedCount = await CleanupFailedTasksAsync(taskRepository, options.FailedTaskRetentionDays, stoppingToken);
-
-                if (completedCount > 0 || failedCount > 0)
+                if (!result.IsEmpty)
                 {
                     logger.LogInformation(
-                        "Artifact cleanup completed. Removed {CompletedCount} completed and {FailedCount} failed tasks.",
-                        completedCount,
-                        failedCount);
+                        "Artifact cleanup completed. Removed {CompletedCount} completed and {FailedCount} failed tasks; failed {StuckCount} abandoned task(s).",
+                        result.CompletedRemoved,
+                        result.FailedRemoved,
+                        result.StuckFailed);
                 }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception exception)
             {
@@ -50,68 +51,5 @@ public sealed class ArtifactCleanupBackgroundService(
 
             await Task.Delay(interval, stoppingToken);
         }
-    }
-
-    private async Task<int> CleanupCompletedTasksAsync(
-        IDocumentGenerationTaskRepository taskRepository,
-        IDocumentArtifactStore artifactStore,
-        int retentionDays,
-        CancellationToken cancellationToken)
-    {
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays);
-        var expiredTasks = await taskRepository.GetExpiredTasksAsync(cutoff, cancellationToken);
-
-        var completedTasks = expiredTasks
-            .Where(t => t.Status == GenerationTaskStatus.Completed && !string.IsNullOrWhiteSpace(t.ResultStoragePath))
-            .ToList();
-
-        foreach (var task in completedTasks)
-        {
-            try
-            {
-                await artifactStore.DeleteAsync(task.ResultStoragePath!, cancellationToken);
-                await taskRepository.DeleteAsync(task.TaskId, cancellationToken);
-            }
-            catch (Exception exception)
-            {
-                logger.LogWarning(
-                    exception,
-                    "Failed to delete artifact for task {TaskId} at {StoragePath}.",
-                    task.TaskId,
-                    task.ResultStoragePath);
-            }
-        }
-
-        return completedTasks.Count;
-    }
-
-    private async Task<int> CleanupFailedTasksAsync(
-        IDocumentGenerationTaskRepository taskRepository,
-        int failedRetentionDays,
-        CancellationToken cancellationToken)
-    {
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-failedRetentionDays);
-        var expiredTasks = await taskRepository.GetExpiredTasksAsync(cutoff, cancellationToken);
-
-        var failedTasks = expiredTasks
-            .Where(t => t.Status == GenerationTaskStatus.Failed)
-            .ToList();
-
-        foreach (var task in failedTasks)
-        {
-            try
-            {
-                await taskRepository.DeleteAsync(task.TaskId, cancellationToken);
-            }
-            catch (Exception exception)
-            {
-                logger.LogWarning(
-                    exception,
-                    "Failed to delete failed task {TaskId}.",
-                    task.TaskId);
-            }
-        }
-
-        return failedTasks.Count;
     }
 }

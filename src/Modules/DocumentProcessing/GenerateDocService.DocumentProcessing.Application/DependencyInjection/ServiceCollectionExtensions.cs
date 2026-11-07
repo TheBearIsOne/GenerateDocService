@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace GenerateDocService.DocumentProcessing.Application.DependencyInjection;
 
@@ -17,6 +18,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Abstractions.Persistence.IDocumentGenerationTaskRepository, Services.InMemoryDocumentGenerationTaskRepository>();
         services.AddSingleton<Abstractions.Storage.IDocumentArtifactStore, Services.InMemoryDocumentArtifactStore>();
         services.AddSingleton<Abstractions.Messaging.IDocumentGenerationEventPublisher, Services.NullDocumentGenerationEventPublisher>();
+        services.AddOptions<Resilience.GenerationResilienceOptions>();
+        services.AddOptions<Services.InMemoryProviderOptions>();
+        services.TryAddSingleton<Resilience.TransientFailureClassifier>(_ => new Resilience.TransientFailureClassifier());
         services.AddScoped<Abstractions.Messaging.IBackgroundDocumentGenerationProcessor, Services.BackgroundDocumentGenerationProcessor>();
         services.AddSingleton<Abstractions.Messaging.IBackgroundGenerationScheduler, Services.InMemoryBackgroundGenerationScheduler>();
         services.AddSingleton<Services.DocumentGenerationMetrics>();

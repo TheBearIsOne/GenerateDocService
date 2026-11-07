@@ -80,11 +80,19 @@ The emphasis is on practical, staged improvements.
 
 ### 3.4 Resilience policies for external dependencies
 
-**Current state**
-- Redis, RabbitMQ, MinIO, and the external FOP converter are configurable, but retry/circuit behavior is implicit.
+**DONE**
+- Background generation retries transient faults (`HttpRequestException`, `TimeoutException`, `IOException`, `SocketException`, plus `RedisConnectionException` when Redis is enabled) up to `MaxAttempts` with exponential backoff, bounded by a `ProcessingTimeoutSeconds` deadline. Cancellation and deadline expiry are terminal and never retried.
+- `DocumentGenerationFailed` is published once after the final attempt instead of on every failure, and the task only reaches `Failed` when no attempts remain.
+- The FOP converter client runs through `AddStandardResilienceHandler` (per-attempt timeout, total budget, exponential retry, circuit breaker), configured via `DocumentProcessing:Fop`. The library's validation invariants are satisfied automatically, so a hand-edited configuration cannot break the first request.
+- In-memory cache and deduplication stores gained TTL and capacity bounds (`DocumentProcessing:InMemory`) so they match the Redis providers instead of growing for the lifetime of the process.
+- The retention job now also fails tasks abandoned in `Processing`, so a crashed worker cannot leave a fingerprint pinned to a task that will never finish.
+
+**Still open**
+- Redis, RabbitMQ, and MinIO clients themselves have no explicit retry/circuit-breaker policy; only failures surfacing through generation are retried.
+- No bulkhead or rate limiting on generation concurrency.
 
 **Improve**
-- Add explicit resilience around external infrastructure.
+- Add explicit resilience around the remaining external infrastructure clients.
 
 **Why**
 - High-load services require controlled failure behavior.
@@ -289,7 +297,8 @@ The emphasis is on practical, staged improvements.
   - HTML to PDF alternative engine;
   - image rendering.
 
-  The FOP adapter currently uses synchronous HTTP conversion. Add timeout, retry, and circuit-breaker policies before treating the external converter as a production dependency.
+  The FOP adapter uses synchronous HTTP conversion, now wrapped in a standard resilience handler
+  (timeout, retry, circuit breaker) — see §3.4.
 
 ---
 
@@ -322,11 +331,11 @@ The emphasis is on practical, staged improvements.
 
 ## 9. Current project position
 
-As of 2026-06-14, the project is **before Phase 1**. All items in Section 10 are pending or in progress.
+As of 2026-11-07, **Phase 1 is complete and Phase 2 is mostly complete**. See §11 for the task-level record.
 
 **Already implemented (not from §10):**
 - Clean Architecture scaffold (Domain, Application, Infrastructure, Presentation, Host, Client)
-- 4 engine plugins (fake, scriban, dotliquid, questpdf)
+- 8 engine plugins (fake, scriban, dotliquid, questpdf, miniexcel, miniword, minipdf, fop)
 - Template parser registry and compiled template cache (in-memory + Redis)
 - MassTransit in-memory messaging with RabbitMQ transport option
 - Redis/RabbitMQ/MinIO infrastructure adapters
@@ -334,11 +343,24 @@ As of 2026-06-14, the project is **before Phase 1**. All items in Section 10 are
 - NBomber performance baselines (15 profiles) — documented in `docs/performance-baseline.md`
 - Unit + integration tests
 
-**Phase 1 tasks — pending:**
-- Durable task persistence (PostgreSQL/SQL Server via EF Core or Dapper)
-- Input validation and guardrails (payload size, template size, format limits)
-- Auth/authz (JWT bearer, role-based authorization)
-- Resilience policies (retry, timeout, circuit-breaker for Redis, RabbitMQ, MinIO)
+**Phase 1 — complete:**
+- Durable task persistence (EF Core + PostgreSQL, advisory-locked migrations at startup)
+- Input validation and guardrails (payload, template, metadata, and format-name limits)
+- Auth/authz (JWT bearer with role-based policies; mandatory signing key)
+- Resilience policies (bounded retry with backoff, processing deadline, FOP timeout/retry/circuit-breaker)
+
+**Phase 2 — mostly complete:**
+- Dedicated worker host — done
+- Artifact retention/cleanup, including abandoned-task reaping — done
+- Broader integration testing — done for PostgreSQL, RabbitMQ, and JWT auth; Redis and MinIO remain, see §11 items 7 and 12
+- Richer dashboards — not started
+
+**Known gaps that block a production-readiness claim:**
+- No automated test exercises the Redis or MinIO adapter code paths. PostgreSQL, RabbitMQ, and JWT authorization are now covered by Testcontainers-backed and host-level integration tests (see §11 item 11); Redis and MinIO are not.
+- Four MiniExcel engine defects are pinned by characterization tests rather than fixed: culture-dependent number formatting on the template path, nested objects silently written as their CLR type name, and two unhandled exceptions on ragged or nested payloads. The silent-corruption one ships bad documents.
+- The byte[] pipeline (payload → `MemoryStream` → `byte[]` → cache/artifact copies) contradicts the "streaming" claim in §7.4 and is the dominant memory cost under load.
+- Health endpoints are anonymous and publish engine implementation class names.
+- Compose sets `ASPNETCORE_ENVIRONMENT=Development` on the API, so the "production-like" stack serves OpenAPI, Scalar, and console telemetry exporters.
 
 ---
 
@@ -373,7 +395,7 @@ As of 2026-06-14, the project is **before Phase 1**. All items in Section 10 are
 
 ---
 
-## 11. Concrete immediate next tasks
+## 11. Concrete task record and next tasks
 
 1. ~~Add `docs/performance-baseline.md` or extend performance docs with standard benchmark matrix.~~ **DONE**
 2. ~~Implement durable task repository.~~ **DONE** — EF Core + PostgreSQL, provider switching via `DocumentProcessing:Persistence:Provider`
@@ -381,7 +403,19 @@ As of 2026-06-14, the project is **before Phase 1**. All items in Section 10 are
 4. ~~Add authentication and authorization.~~ **DONE** — JWT bearer auth with role-based policies, disabled by default for local dev
 5. ~~Create a dedicated worker host.~~ **DONE** — separate `GenerateDocService.Worker` project, MassTransit consumer runs independently of API
 6. ~~Add retention and cleanup for stored artifacts.~~ **DONE** — configurable retention (30d completed, 7d failed), background cleanup job with `DeleteAsync` on artifact store
-7. ~~Expand integration tests for production-like providers.~~ **DONE** — 16 new tests covering validation errors, edge cases, failed generation paths, and in-progress download behavior (total: 21 integration tests)
+7. Expand integration tests for production-like providers. **Originally marked DONE in error.** The 16 tests that were added cover validation errors, edge cases, failed generation paths, and in-progress download behaviour, all against **in-memory** providers. Cost already incurred: with the whole suite green, a missing EF migration and a RabbitMQ queue/endpoint name mismatch made the Dockerised async pipeline completely non-functional, and only a live end-to-end run exposed them. **Since closed for PostgreSQL, RabbitMQ, and JWT authorization by item 11; Redis and MinIO remain uncovered.**
+8. ~~Make generation failures retryable and add resilience policies.~~ **DONE** — see §3.4. Transient faults retry with backoff under a processing deadline, the FOP client gained a timeout/retry/circuit-breaker pipeline, and the in-memory cache and deduplication stores gained TTL and capacity bounds.
+9. ~~Reap tasks abandoned in `Processing`.~~ **DONE** — `ArtifactRetentionCleaner` fails them after `StuckProcessingTaskSeconds`, and the policy is now unit-tested separately from its scheduler.
+10. ~~Clear the NuGet vulnerability advisories.~~ **DONE** — OpenTelemetry 1.12.0 → 1.20.1, `Microsoft.AspNetCore.OpenApi` 10.0.7 → 10.0.14 (which lifts the transitive `Microsoft.OpenApi` off the advisory), and `MessagePack` pinned to 2.5.307 in the NBomber project. A forced restore now reports zero `NU1902`/`NU1903` warnings; it previously reported 46.
+
+**Next tasks**
+
+11. ~~Add Testcontainers-backed coverage for the PostgreSQL repository and migrations, a RabbitMQ round-trip, and JWT authorization.~~ **DONE** — `Category=RequiresDocker` tests start real `postgres:17` and `rabbitmq:3-management` containers, apply migrations through the same `ApplyDocumentProcessingMigrationsAsync` call both hosts use, round-trip task state through `PostgreSqlDocumentGenerationTaskRepository`, and complete an async generation over RabbitMQ to prove the receive endpoint matches `QueueName`. Nine host-level tests cover JWT auth (401/403/200, expired and wrongly-signed tokens, anonymous health, startup failure on a short signing key). Containers skip cleanly when Docker is unreachable.
+12. Add the same container coverage for the Redis cache/deduplication/compiled-template adapters and the MinIO artifact store — the last untested provider paths.
+13. Fix or formally accept the four characterized MiniExcel defects; the nested-object one silently ships corrupt documents.
+14. Stream artifacts end to end instead of copying through `byte[]` at every hop (§7.4 claims streaming today).
+15. Decide whether health-endpoint detail and Scalar should be exposed outside Development, and stop shipping `ASPNETCORE_ENVIRONMENT=Development` in the compose stack.
+16. Add a CI gate so NuGet advisories cannot silently return.
 
 ---
 

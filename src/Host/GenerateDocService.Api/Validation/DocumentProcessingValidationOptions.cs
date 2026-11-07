@@ -12,5 +12,4 @@ public sealed class DocumentProcessingValidationOptions
     public int MaxEngineNameLength { get; set; } = 64;
     public int MaxFormatNameLength { get; set; } = 64;
     public int MaxRequestIdLength { get; set; } = 64;
-    public TimeSpan MaxProcessingTimeout { get; set; } = TimeSpan.FromMinutes(5);
 }

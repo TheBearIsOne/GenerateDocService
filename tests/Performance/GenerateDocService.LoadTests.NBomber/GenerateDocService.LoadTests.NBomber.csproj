@@ -9,6 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="NBomber" Version="6.4.1" />
+    <!-- NBomber 6.4.1 pulls MessagePack 2.5.192, which has open security advisories. A direct
+         reference overrides the transitive version without moving the load-test framework. -->
+    <PackageReference Include="MessagePack" Version="2.5.307" />
   </ItemGroup>
 
 </Project>
