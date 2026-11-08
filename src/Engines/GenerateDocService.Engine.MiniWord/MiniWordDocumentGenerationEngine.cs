@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using GenerateDocService.Engine.Abstractions;
@@ -89,7 +90,11 @@ public sealed class MiniWordDocumentGenerationEngine : IDocumentGenerationEngine
             JsonValueKind.Array => element.EnumerateArray().Select(JsonElementToValue).ToList(),
             JsonValueKind.String => element.GetString() ?? string.Empty,
             JsonValueKind.Number when element.TryGetInt64(out var longValue) => longValue,
-            JsonValueKind.Number when element.TryGetDouble(out var doubleValue) => doubleValue,
+            // MiniWord renders values with the ambient culture, so a fractional number came out as
+            // 1234,56 on a ru-RU host. A Word document has no numeric cell type to preserve, so the
+            // invariant text form is the correct representation.
+            JsonValueKind.Number when element.TryGetDouble(out var doubleValue)
+                => doubleValue.ToString(CultureInfo.InvariantCulture),
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Null => string.Empty,

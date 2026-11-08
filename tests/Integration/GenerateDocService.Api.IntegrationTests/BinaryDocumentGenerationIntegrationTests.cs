@@ -81,6 +81,45 @@ public sealed class BinaryDocumentGenerationIntegrationTests : IClassFixture<Web
     }
 
     [Fact]
+    public async Task MiniExcel_ShouldExpandARepeatingTemplateRow_OncePerRecord()
+    {
+        using var client = CreateClient();
+
+        // The collection syntax is {{list.field}}; a leading $ is not part of it and would be left
+        // in the cell verbatim.
+        var template = CreateXlsxTemplateRows(
+            ["{{title}}"],
+            ["Item", "Qty", "Price"],
+            ["{{items.name}}", "{{items.qty}}", "{{items.price}}"]);
+
+        var response = await client.PostAsJsonAsync("/api/v1/documents/sync", new GenerateDocumentHttpRequest(
+            RequestId: Guid.NewGuid().ToString("N"),
+            Engine: "miniexcel",
+            InputFormat: "json",
+            OutputFormat: "xlsx",
+            TemplateFormat: "xlsx",
+            Payload: """
+                {"title":"Invoice INV-1","items":[{"name":"Widget","qty":2,"price":9.5},{"name":"Gadget","qty":5,"price":19.99},{"name":"Doohickey","qty":1,"price":4.25}]}
+                """,
+            Template: null,
+            Metadata: null,
+            PayloadBase64: null,
+            TemplateBase64: Convert.ToBase64String(template)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var worksheetXml = ReadZipEntry(await response.Content.ReadAsByteArrayAsync(), "xl/worksheets/sheet1.xml");
+
+        worksheetXml.Should().Contain("Invoice INV-1");
+        worksheetXml.Should().Contain("Widget").And.Contain("Gadget").And.Contain("Doohickey");
+        worksheetXml.Should().NotContain("{{items.");
+
+        // Numeric cells stay numeric and invariant, so the culture pin covers the template path too.
+        worksheetXml.Should().Contain("<v>19.99</v>");
+        worksheetXml.Should().NotContain("19,99");
+    }
+
+    [Fact]
     public async Task MiniPdf_ShouldConvertABinaryWorkbook_SentAsBase64()
     {
         using var client = CreateClient();
@@ -312,6 +351,13 @@ public sealed class BinaryDocumentGenerationIntegrationTests : IClassFixture<Web
     }
 
     private static byte[] CreateXlsxTemplate(params string[] cellValues)
+        => CreateXlsxTemplateRows(cellValues.Select(value => new[] { value }).ToArray());
+
+    /// <summary>
+    /// Builds a workbook template from an explicit row and column layout, which a repeating
+    /// <c>{{items.field}}</c> row needs: the tokens for one record must sit side by side.
+    /// </summary>
+    private static byte[] CreateXlsxTemplateRows(params string[][] rows)
     {
         using var stream = new MemoryStream();
 
@@ -345,15 +391,23 @@ public sealed class BinaryDocumentGenerationIntegrationTests : IClassFixture<Web
                 </Relationships>
                 """);
 
-            var rows = string.Join(
-                string.Empty,
-                cellValues.Select((value, index) =>
-                    $"<row r=\"{index + 1}\"><c r=\"A{index + 1}\" t=\"inlineStr\"><is><t>{Escape(value)}</t></is></c></row>"));
+            var rowsXml = new StringBuilder();
+            for (var r = 0; r < rows.Length; r++)
+            {
+                var cells = new StringBuilder();
+                for (var c = 0; c < rows[r].Length; c++)
+                {
+                    cells.Append(
+                        $"<c r=\"{(char)('A' + c)}{r + 1}\" t=\"inlineStr\"><is><t>{Escape(rows[r][c])}</t></is></c>");
+                }
+
+                rowsXml.Append($"<row r=\"{r + 1}\">{cells}</row>");
+            }
 
             WriteEntry(archive, "xl/worksheets/sheet1.xml", $"""
                 <?xml version="1.0" encoding="UTF-8"?>
                 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-                    <sheetData>{rows}</sheetData>
+                    <sheetData>{rowsXml}</sheetData>
                 </worksheet>
                 """);
         }

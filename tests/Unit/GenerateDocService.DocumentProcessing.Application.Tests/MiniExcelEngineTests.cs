@@ -357,7 +357,7 @@ public sealed class MiniExcelEngineTests
     public async Task GenerateAsync_ShouldThrowWhenTemplatePlaceholderResolvesToNestedObject()
     {
         // Accepted behaviour, not an oversight. MiniExcel's template renderer supports nested and
-        // collection values for its {{$list.field}} syntax, so the engine cannot reject nesting
+        // collection values for its {{list.field}} syntax, so the engine cannot reject nesting
         // wholesale without breaking legitimate templates, and it cannot tell which placeholder a
         // value belongs to without parsing the workbook XML. Telling the two cases apart belongs in
         // MiniExcel; this test pins what callers get today so a change is noticed.

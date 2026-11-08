@@ -299,7 +299,40 @@ static List<EngineExample> BuildExamples()
                     client,
                     BinaryRequest("minipdf", "xlsx", "pdf", null, payloadBase64: Convert.ToBase64String(workbook)),
                     "minipdf");
-            })
+            }),
+
+        new EngineExample(
+            "14",
+            "miniword",
+            "json -> docx",
+            "Invoice: a multi-paragraph .docx template filled from one JSON object",
+            client => RunSyncAsync(
+                client,
+                BinaryRequest(
+                    "miniword", "json", "docx", "docx",
+                    payload: """
+                        {"title":"INV-2026-001","customer":"Ada Lovelace","date":"2026-11-07","item":"Analytical Engine","quantity":2,"unitPrice":1250.55,"total":2501.1,"notes":"Thank you for your business."}
+                        """,
+                    templateBase64: Convert.ToBase64String(
+                        OfficeFixtures.CreateDocxTemplate(OfficeFixtures.InvoiceDocxTemplate))),
+                "miniword invoice")),
+
+        new EngineExample(
+            "15",
+            "miniexcel",
+            "json -> xlsx",
+            "Invoice: scalar placeholders plus a repeating {{items.*}} data row",
+            client => RunSyncAsync(
+                client,
+                BinaryRequest(
+                    "miniexcel", "json", "xlsx", "xlsx",
+                    payload: OfficeFixtures.InvoiceXlsxPayload,
+                    templateBase64: Convert.ToBase64String(OfficeFixtures.CreateXlsxTemplateRows(
+                        ["{{title}}"],
+                        ["Customer:", "{{customer}}", "Date:", "{{date}}"],
+                        ["Item", "Qty", "Unit price"],
+                        ["{{items.name}}", "{{items.qty}}", "{{items.price}}"]))),
+                "miniexcel invoice"))
     ];
 }
 
@@ -662,8 +695,33 @@ internal sealed record EngineExample(
 /// </summary>
 internal static class OfficeFixtures
 {
+    internal const string InvoiceDocxTemplate = """
+        INVOICE {{title}}
+
+        Customer: {{customer}}
+        Date:     {{date}}
+
+        Item:       {{item}}
+        Quantity:   {{quantity}}
+        Unit price: {{unitPrice}}
+        Total:      {{total}}
+
+        {{notes}}
+        """;
+
+    internal const string InvoiceXlsxPayload = """
+        {"title":"Invoice INV-2026-001","customer":"Ada Lovelace","date":"2026-11-07","items":[{"name":"Widget","qty":2,"price":9.5},{"name":"Gadget","qty":5,"price":19.99},{"name":"Doohickey","qty":1,"price":4.25}]}
+        """;
+
     internal static byte[] CreateDocxTemplate(string textContent)
     {
+        // One paragraph per line, so a multi-line template renders as separate lines in Word rather
+        // than as a single run containing literal newlines.
+        var paragraphs = string.Join(
+            string.Empty,
+            textContent.Split('\n').Select(line =>
+                $"<w:p><w:r><w:t xml:space=\"preserve\">{Escape(line)}</w:t></w:r></w:p>"));
+
         using var stream = new MemoryStream();
 
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
@@ -685,7 +743,7 @@ internal static class OfficeFixtures
             WriteEntry(archive, "word/document.xml", $"""
                 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
                 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-                <w:body><w:p><w:r><w:t xml:space="preserve">{Escape(textContent)}</w:t></w:r></w:p></w:body>
+                <w:body>{paragraphs}</w:body>
                 </w:document>
                 """);
             WriteEntry(archive, "word/_rels/document.xml.rels", """
@@ -699,6 +757,13 @@ internal static class OfficeFixtures
     }
 
     internal static byte[] CreateXlsxTemplate(params string[] cellValues)
+        => CreateXlsxTemplateRows(cellValues.Select(value => new[] { value }).ToArray());
+
+    /// <summary>
+    /// Builds a workbook template from an explicit row/column layout, which is what a repeating
+    /// <c>{{items.field}}</c> data row needs: the tokens for one record must sit side by side.
+    /// </summary>
+    internal static byte[] CreateXlsxTemplateRows(params string[][] rows)
     {
         using var stream = new MemoryStream();
 
@@ -732,15 +797,23 @@ internal static class OfficeFixtures
                 </Relationships>
                 """);
 
-            var rows = string.Join(
-                string.Empty,
-                cellValues.Select((value, index) =>
-                    $"<row r=\"{index + 1}\"><c r=\"A{index + 1}\" t=\"inlineStr\"><is><t>{Escape(value)}</t></is></c></row>"));
+            var rowsXml = new StringBuilder();
+            for (var r = 0; r < rows.Length; r++)
+            {
+                var cells = new StringBuilder();
+                for (var c = 0; c < rows[r].Length; c++)
+                {
+                    cells.Append(
+                        $"<c r=\"{(char)('A' + c)}{r + 1}\" t=\"inlineStr\"><is><t>{Escape(rows[r][c])}</t></is></c>");
+                }
+
+                rowsXml.Append($"<row r=\"{r + 1}\">{cells}</row>");
+            }
 
             WriteEntry(archive, "xl/worksheets/sheet1.xml", $"""
                 <?xml version="1.0" encoding="UTF-8"?>
                 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-                    <sheetData>{rows}</sheetData>
+                    <sheetData>{rowsXml}</sheetData>
                 </worksheet>
                 """);
         }

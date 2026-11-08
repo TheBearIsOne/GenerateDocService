@@ -83,7 +83,9 @@ The table path (`template` omitted) writes one row per item and applies three ru
 - **Nested values are rejected.** A JSON object or array where a cell is expected throws `InvalidOperationException` naming the JSON path, for example `$.address`. Previously the CLR type name `System.Collections.Generic.Dictionary\`2[...]` was written into the cell and the request reported success, so a corrupt workbook shipped silently. Flatten nested data in the payload.
 - **Ragged items are aligned.** Headers are the union of every item's keys and missing values become empty cells. Previously headers came from the first item only, so an item missing a key raised an unhandled `KeyNotFoundException` and an item adding one had it dropped.
 
-One MiniExcel limitation is accepted rather than fixed: on the *template* path a `{{placeholder}}` bound to a nested object or array raises an unhandled `IndexOutOfRangeException` from MiniExcel's renderer. The engine cannot reject nesting there without breaking MiniExcel's supported `{{$list.field}}` collection syntax, and cannot tell the two apart without parsing the template's tokens.
+The template path also supports **repeating rows**: put `{{items.name}}`, `{{items.qty}}` and so on side by side in one row of the template and bind `items` to a JSON array, and MiniExcel expands that row once per record, writing numbers as numeric cells. The syntax is `{{list.field}}` — a leading `$` is *not* part of it and is left in the cell as a literal. Sample client example 15 demonstrates an invoice built this way.
+
+One MiniExcel limitation is accepted rather than fixed: on the *template* path a `{{placeholder}}` bound to a nested object or array raises an unhandled `IndexOutOfRangeException` from MiniExcel's renderer. The engine cannot reject nesting there without breaking the `{{list.field}}` collection syntax above, and cannot tell the two apart without parsing the template's tokens.
 
 This keeps the current modular monolith ready for future extraction of engines into isolated modules or services.
 
@@ -683,7 +685,7 @@ dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://local
 dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:5287 engines
 ```
 
-The menu covers all eight engines across thirteen examples: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel` (table *and* template paths), `miniword`, `minipdf`, `fop`, and two auto-selection examples that omit `engine`. Text output is printed inline; PDF, XLSX and DOCX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `q` (quit).
+The menu covers all eight engines across fifteen examples: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel` (table path, template path, and an invoice template with repeating `{{items.*}}` data rows), `miniword` (a single-record form and a multi-paragraph invoice), `minipdf`, `fop`, and two auto-selection examples that omit `engine`. Text output is printed inline; PDF, XLSX and DOCX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `q` (quit).
 
 Set `GDS_SAMPLE_TOKEN` to attach a bearer token, which the Docker stack requires:
 
