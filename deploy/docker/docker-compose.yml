@@ -15,7 +15,7 @@ services:
       # the Development environment. Health probes stay minimal; set
       # DocumentProcessing__Api__ExposeHealthDetails to 'true' to publish per-check detail.
       DocumentProcessing__Api__ExposeOpenApi: 'true'
-      DocumentProcessing__Authentication__Enabled: 'true'
+      DocumentProcessing__Authentication__Enabled: 'false'
       DocumentProcessing__Authentication__SigningKey: ${GDS_AUTH_SIGNING_KEY:?GDS_AUTH_SIGNING_KEY must be set to a secret of at least 32 characters}
       DocumentProcessing__Caching__Provider: Redis
       DocumentProcessing__Caching__Redis__ConnectionString: redis:6379
