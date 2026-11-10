@@ -11,7 +11,7 @@ using System.Text;
 using GenerateDocService.DocumentProcessing.Domain.Tasks;
 using GenerateDocService.DocumentProcessing.Presentation.Contracts;
 
-var baseAddress = args.Length > 0 ? args[0] : "http://localhost:5287";
+var baseAddress = args.Length > 0 ? args[0] : "http://localhost:8081";
 var selection = args.Length > 1 ? args[1] : null;
 var token = Environment.GetEnvironmentVariable("GDS_SAMPLE_TOKEN");
 
@@ -67,6 +67,8 @@ PrintMenu(examples);
 
 while (true)
 {
+    PrintHelp();
+
     Console.Write("Select an example: ");
     var input = Console.ReadLine();
 
@@ -128,6 +130,14 @@ while (true)
 static List<EngineExample> BuildExamples()
 {
     const string customerPayload = """{"document":"hello","customer":{"name":"Ada Lovelace"}}""";
+
+    /*
+    File.WriteAllBytes("template.docx", OfficeFixtures.CreateXlsxTemplateRows(
+                        ["{{title}}"],
+                        ["Customer:", "{{customer}}", "Date:", "{{date}}"],
+                        ["Item", "Qty", "Unit price"],
+                        ["{{items.name}}", "{{items.qty}}", "{{items.price}}"]));
+    */
 
     return
     [
@@ -318,6 +328,22 @@ static List<EngineExample> BuildExamples()
                 "miniword invoice")),
 
         new EngineExample(
+            "14.1",
+            "miniword",
+            "json -> docx",
+            "Invoice: a multi-paragraph .docx template filled from one JSON object, template: word file docx",
+            client => RunSyncAsync(
+                client,
+                BinaryRequest(
+                    "miniword", "json", "docx", "docx",
+                    payload: """
+                        {"title":"INV-2026-001","customer":"Ada Lovelace","date":"2026-11-07","item":"Analytical Engine","quantity":2,"unitPrice":1250.55,"total":2501.1,"notes":"Thank you for your business."}
+                        """,
+                    templateBase64: Convert.ToBase64String(
+                        OfficeFixtures.TemplateRows("template.docx"))),
+                "miniword invoice")),
+
+        new EngineExample(
             "15",
             "miniexcel",
             "json -> xlsx",
@@ -332,6 +358,21 @@ static List<EngineExample> BuildExamples()
                         ["Customer:", "{{customer}}", "Date:", "{{date}}"],
                         ["Item", "Qty", "Unit price"],
                         ["{{items.name}}", "{{items.qty}}", "{{items.price}}"]))),
+                "miniexcel invoice"))
+
+        ,
+
+        new EngineExample(
+            "15.1",
+            "miniexcel",
+            "json -> xlsx",
+            "Invoice: scalar placeholders plus a repeating {{items.*}} data row",
+            client => RunSyncAsync(
+                client,
+                BinaryRequest(
+                    "miniexcel", "json", "xlsx", "xlsx",
+                    payload: OfficeFixtures.InvoiceXlsxPayload,
+                    templateBase64: Convert.ToBase64String(OfficeFixtures.TemplateRows("template.xlsx"))),
                 "miniexcel invoice"))
     ];
 }
@@ -650,7 +691,10 @@ static void PrintMenu(List<EngineExample> examples)
     {
         Console.WriteLine($"  {example.Id,2}. {example.Engine,-11} {example.Title,-14} {example.Detail}");
     }
+}
 
+static void PrintHelp()
+{
     Console.WriteLine();
     Console.WriteLine("  0 or all  run every example      e  list engines      m  redisplay menu      q  quit");
     Console.WriteLine();
@@ -712,6 +756,11 @@ internal static class OfficeFixtures
     internal const string InvoiceXlsxPayload = """
         {"title":"Invoice INV-2026-001","customer":"Ada Lovelace","date":"2026-11-07","items":[{"name":"Widget","qty":2,"price":9.5},{"name":"Gadget","qty":5,"price":19.99},{"name":"Doohickey","qty":1,"price":4.25}]}
         """;
+
+    internal static byte[] TemplateRows(string path)
+    {
+        return File.ReadAllBytes(path);
+    }
 
     internal static byte[] CreateDocxTemplate(string textContent)
     {
