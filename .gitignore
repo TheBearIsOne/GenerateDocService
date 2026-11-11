@@ -67,3 +67,6 @@ TestResult.xml
 nunit-*.xml
 
 .fake
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/

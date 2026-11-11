@@ -73,7 +73,8 @@ public sealed class MinioArtifactStoreIntegrationTests : IClassFixture<MinioArti
 
     public MinioArtifactStoreIntegrationTests(MinioArtifactStoreFixture fixture) => _fixture = fixture;
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public void ObjectStorageProvider_ShouldReplaceTheInMemoryArtifactStore()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
@@ -82,7 +83,8 @@ public sealed class MinioArtifactStoreIntegrationTests : IClassFixture<MinioArti
             .Should().BeOfType<MinioDocumentArtifactStore>();
     }
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public async Task ArtifactStore_ShouldCreateTheBucketAndRoundTripAnArtifact()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
@@ -108,7 +110,8 @@ public sealed class MinioArtifactStoreIntegrationTests : IClassFixture<MinioArti
         stored.ToByteArray().Should().Equal(content);
     }
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public async Task ArtifactStore_ShouldMakeAnArtifactUnavailableAfterDelete()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
@@ -128,7 +131,8 @@ public sealed class MinioArtifactStoreIntegrationTests : IClassFixture<MinioArti
         await act.Should().ThrowAsync<Exception>();
     }
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public async Task ArtifactStore_ShouldIgnoreAMalformedStoragePath()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);

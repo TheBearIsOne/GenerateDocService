@@ -1,12 +1,18 @@
 ﻿// Usage: dotnet run --project src/Clients/GenerateDocService.SampleClient -- [baseAddress] [selection]
 //
-//   baseAddress  API root, default http://localhost:5287
-//   selection    optional example id, "all", or "engines"; omit to get an interactive menu
+//   baseAddress  API root, default http://localhost:8081 (the Docker stack)
+//   selection    optional example id, "all", "engines" or "benchmark"; omit for an interactive menu
 //
-// Set GDS_SAMPLE_TOKEN to attach a bearer token, which the Docker stack requires.
+// Set GDS_SAMPLE_TOKEN to attach a bearer token when the target API has authentication enabled.
+//
+// The benchmarks run in-process and need no API, but BenchmarkDotNet requires a Release build:
+//   dotnet run -c Release --project src/Clients/GenerateDocService.SampleClient -- benchmark
+//   dotnet run -c Release --project src/Clients/GenerateDocService.SampleClient -- benchmark --filter *Scriban*
+using BenchmarkDotNet.Running;
 using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text;
 using GenerateDocService.DocumentProcessing.Domain.Tasks;
 using GenerateDocService.DocumentProcessing.Presentation.Contracts;
@@ -14,6 +20,13 @@ using GenerateDocService.DocumentProcessing.Presentation.Contracts;
 var baseAddress = args.Length > 0 ? args[0] : "http://localhost:8081";
 var selection = args.Length > 1 ? args[1] : null;
 var token = Environment.GetEnvironmentVariable("GDS_SAMPLE_TOKEN");
+
+if (args.Length > 0
+    && (string.Equals(args[0], "benchmark", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(args[0], "bench", StringComparison.OrdinalIgnoreCase)))
+{
+    return RunBenchmarks(args.Skip(1).ToArray());
+}
 
 using var httpClient = new HttpClient
 {
@@ -102,6 +115,13 @@ while (true)
         || string.Equals(choice, "menu", StringComparison.OrdinalIgnoreCase))
     {
         PrintMenu(examples);
+        continue;
+    }
+
+    if (string.Equals(choice, "b", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(choice, "benchmark", StringComparison.OrdinalIgnoreCase))
+    {
+        RunBenchmarks([]);
         continue;
     }
 
@@ -696,8 +716,27 @@ static void PrintMenu(List<EngineExample> examples)
 static void PrintHelp()
 {
     Console.WriteLine();
-    Console.WriteLine("  0 or all  run every example      e  list engines      m  redisplay menu      q  quit");
+    Console.WriteLine("  0 or all  run every example      e  list engines      b  benchmarks (Release build only)");
+    Console.WriteLine("  m  redisplay menu                q  quit");
     Console.WriteLine();
+}
+
+static int RunBenchmarks(string[] benchmarkArgs)
+{
+#if DEBUG
+    Console.WriteLine("BenchmarkDotNet measures nothing useful in a Debug build. Re-run with:");
+    Console.WriteLine("  dotnet run -c Release --project src/Clients/GenerateDocService.SampleClient -- benchmark");
+    Console.WriteLine();
+    return 1;
+#else
+    // With no arguments BenchmarkDotNet prompts interactively, which blocks when output is
+    // redirected, so default to every benchmark in this assembly.
+    var effective = benchmarkArgs.Length > 0 ? benchmarkArgs : ["--filter", "*"];
+
+    BenchmarkSwitcher.FromAssembly(Assembly.GetExecutingAssembly()).Run(effective);
+    Console.WriteLine();
+    return 0;
+#endif
 }
 
 static void PrintSection(string title)

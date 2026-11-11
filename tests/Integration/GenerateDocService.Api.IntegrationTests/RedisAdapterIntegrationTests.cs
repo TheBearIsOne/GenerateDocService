@@ -70,7 +70,8 @@ public sealed class RedisAdapterIntegrationTests : IClassFixture<RedisAdapterFix
 
     public RedisAdapterIntegrationTests(RedisAdapterFixture fixture) => _fixture = fixture;
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public void RedisProvider_ShouldReplaceEveryInMemoryCacheAbstraction()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
@@ -83,7 +84,8 @@ public sealed class RedisAdapterIntegrationTests : IClassFixture<RedisAdapterFix
             .Should().BeOfType<RedisCompiledTemplateCache>();
     }
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public async Task DeduplicationStore_ShouldKeepTheFirstOwnerUntilReleased()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
@@ -108,7 +110,8 @@ public sealed class RedisAdapterIntegrationTests : IClassFixture<RedisAdapterFix
         afterRelease.TaskId.Should().Be("task-d");
     }
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public async Task DeduplicationStore_ShouldApplyTheConfiguredTtl()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
@@ -125,7 +128,8 @@ public sealed class RedisAdapterIntegrationTests : IClassFixture<RedisAdapterFix
         ttl!.Value.Should().BeCloseTo(TimeSpan.FromMinutes(15), TimeSpan.FromSeconds(30));
     }
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public async Task GeneratedDocumentCache_ShouldRoundTripADocument()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
@@ -157,7 +161,8 @@ public sealed class RedisAdapterIntegrationTests : IClassFixture<RedisAdapterFix
         cached.Artifact.ObjectKey.Should().Be("req-1/report.txt");
     }
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public async Task CompiledTemplateCache_ShouldRoundTripAScribanTemplateThatStillRenders()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
@@ -186,7 +191,8 @@ public sealed class RedisAdapterIntegrationTests : IClassFixture<RedisAdapterFix
         rendered.Should().Be("Hello Ada");
     }
 
-    [Fact]
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
     public async Task CompiledTemplateCache_ShouldSilentlySkipANonScribanTemplate()
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);

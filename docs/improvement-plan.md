@@ -239,15 +239,19 @@ The emphasis is on practical, staged improvements.
 
 ### 6.3 Add parser/cache benchmarks
 
-**Current state**
-- NBomber baselines exist.
+**DONE** — BenchmarkDotNet 0.15.8 is hosted inside `GenerateDocService.SampleClient`, run with `-- benchmark` (or the `b` menu command) under a Release build. Three classes in `Benchmarks/InProcessBenchmarks.cs`: `EngineGenerationBenchmarks` (scriban, dotliquid, questpdf, miniexcel table and template paths, miniword), `TemplateParserCacheBenchmarks` (compile on cache miss versus warm `InMemoryCompiledTemplateCache` hit, for both parsers), and `RequestPipelineBenchmarks` (fingerprinting at 1 KB and 1 MB, base64 encode/decode of 1 MB). Inputs are built in `[GlobalSetup]` so measured methods allocate only what the engine does. `BenchmarkDotNet.Artifacts/` is gitignored.
 
-**Improve**
-- Add lower-level benchmarks for parser compilation and cache hit/miss behavior.
+**Current state**
+- NBomber baselines exist for end-to-end HTTP load.
+- In-process microbenchmarks now exist alongside them.
+
+**Still open**
+- No benchmark covers `GenerateDocumentRequestValidator`, which lives in the API host; referencing that project from the sample client would pull the whole web host into a demo executable. Covering it needs either a shared validation library or a benchmark project outside `src/Clients`.
+- Results are not captured as a committed baseline, so there is nothing to regress against yet.
 
 **How**
 - Keep NBomber for end-to-end.
-- Add focused microbenchmarks separately if needed.
+- Keep the BenchmarkDotNet classes for component-level comparisons.
 
 ### 6.4 Better local bootstrap
 

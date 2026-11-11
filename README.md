@@ -663,6 +663,36 @@ Recommended baseline comparison workflow:
 3. Compare Scriban and DotLiquid using the same input/output shape.
 4. Keep report folders as historical snapshots for regression comparison.
 
+### In-process microbenchmarks
+
+NBomber measures the service end to end over HTTP. For per-component numbers the sample client also hosts BenchmarkDotNet benchmarks that call the engines directly, with no API, Docker, or FOP converter involved:
+
+```powershell
+# Everything (takes a while; Release is required, BenchmarkDotNet rejects Debug)
+dotnet run -c Release --project src/Clients/GenerateDocService.SampleClient -- benchmark
+
+# One class, or one category
+dotnet run -c Release --project src/Clients/GenerateDocService.SampleClient -- benchmark --filter *TemplateParserCacheBenchmarks*
+dotnet run -c Release --project src/Clients/GenerateDocService.SampleClient -- benchmark --anyCategories text
+
+# Smoke-check the harness without waiting for statistics
+dotnet run -c Release --project src/Clients/GenerateDocService.SampleClient -- benchmark --job Dry --filter *Scriban*
+```
+
+`benchmark` is also the `b` command in the interactive menu, and any arguments after it are passed straight to BenchmarkDotNet.
+
+Three classes live in `src/Clients/GenerateDocService.SampleClient/Benchmarks/InProcessBenchmarks.cs`:
+
+| Class | Categories | Measures |
+|-------|-----------|----------|
+| `EngineGenerationBenchmarks` | `text`, `office`, `pdf` | scriban, dotliquid, questpdf, and the miniexcel table and template paths plus miniword |
+| `TemplateParserCacheBenchmarks` | `scriban`, `dotliquid` | template compilation on a cache miss against a warm `InMemoryCompiledTemplateCache` hit |
+| `RequestPipelineBenchmarks` | `fingerprint`, `transport` | request fingerprinting at 1 KB and 1 MB, and base64 encode/decode of a 1 MB payload |
+
+Every payload, template and request is built in `[GlobalSetup]`, so the measured methods allocate only what the engine itself allocates. Reports are written to `BenchmarkDotNet.Artifacts/results/`, which is gitignored.
+
+These benchmarks do **not** cover `GenerateDocumentRequestValidator`, because it lives in the API host and referencing that project from the sample client would pull the whole web host into a demo executable.
+
 ## Run
 
 Start API:
