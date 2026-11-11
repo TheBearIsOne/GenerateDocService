@@ -122,6 +122,19 @@ Contains transport wiring:
 - metrics export;
 - OpenAPI.
 
+### 3.2 Fault-tolerance model
+
+The design already embeds several resilience patterns that keep generation jobs robust under transient failure:
+
+- background generation retries transient faults (for example `HttpRequestException`, `TimeoutException`, `IOException`, `SocketException`, and Redis connection issues) with exponential backoff until the configured deadline is reached;
+- the PostgreSQL outbox and task lease pattern ensures async work is not lost when the API or worker is restarted, and duplicate delivery is tolerated by the task state machine;
+- the FOP converter uses a standard `HttpClient` resilience handler with per-attempt timeout, total timeout, retry windows, and a circuit breaker so converter outages do not cascade into unbounded wait states;
+- generated document and request deduplication caches reduce repeated work and help the system recover from transient duplicate submissions without running the same job repeatedly;
+- in-memory providers enforce TTL and bounded capacity so local development remains safe under load and does not leak memory indefinitely;
+- health checks cover engine readiness, Redis, PostgreSQL, RabbitMQ, and object storage so operational issues are visible before they affect user requests.
+
+This is not a full distributed-failure model yet, but it represents a solid fault-tolerant foundation for a modular monolith and gives the project a practical path toward a more production-grade deployment.
+
 ---
 
 ## 4. Main building blocks
@@ -404,6 +417,8 @@ Current custom metrics:
 - bus-based async processing;
 - health readiness split;
 - metrics and tracing;
+- outbox-backed async dispatch and bounded retry patterns;
+- fault-tolerant generation lifecycle with retry deadlines and circuit breaking for external HTTP dependencies;
 - integration coverage for core API behavior.
 
 ---
@@ -416,7 +431,7 @@ Current custom metrics:
 4. No persistent relational task store yet.
 5. No formal versioning strategy for engine contracts.
 6. No tenant isolation model.
-7. No advanced resilience policies around external dependencies.
+7. Redis, RabbitMQ, and MinIO clients still need explicit per-client resilience policies beyond the generation workflow itself.
 8. No explicit admin/operations endpoints beyond health and task status.
 
 ---

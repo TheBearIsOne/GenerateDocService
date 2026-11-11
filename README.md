@@ -33,6 +33,32 @@ Current first iteration includes:
 - NBomber-based performance baseline project;
 - unit and integration test coverage.
 
+## Architecture at a glance
+
+`GenerateDocService` is organized as a modular monolith built around a clean separation of concerns:
+
+- `src/Host/GenerateDocService.Api` exposes the HTTP surface, authentication, correlation IDs, health checks, OpenTelemetry, and API contracts.
+- `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Application` owns orchestration, engine selection, task lifecycle, deduplication, and generation workflows.
+- `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Infrastructure` wires caches, persistence, outbox dispatch, messaging, MinIO/object storage, and infrastructure-specific health checks.
+- `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Presentation` maps HTTP request/response models and keeps the API layer thin.
+- `src/Engines/*` modules implement plugin-style document generation engines whose capabilities are discovered by metadata so the runtime can route requests without hard-coded coupling.
+- `src/Host/GenerateDocService.Worker` handles asynchronous document generation, allowing work to be separated from the API ingress path when needed.
+
+This keeps the solution easy to run locally while still allowing Redis, RabbitMQ, MinIO, and PostgreSQL to replace in-memory defaults without changing the core application contract.
+
+## Fault tolerance and resiliency
+
+Fault tolerance is built into the service design rather than treated as an afterthought:
+
+- asynchronous generation uses a durable task and outbox model so requests are not lost when the API or worker restarts;
+- transient broker, Redis, and generation failures are retried with bounded backoff and a processing deadline instead of looping forever;
+- the FOP HTTP converter is protected by a standard resilience pipeline with per-attempt timeout, total timeout, exponential retry, and a circuit breaker;
+- deduplication records and generated-document cache entries prevent duplicate work and short-circuit repeated generation for the same payload fingerprint;
+- in-memory providers are bounded by TTL and capacity settings so they do not grow without limit under load;
+- health checks and readiness probes surface infrastructure and engine problems before they become customer-visible outages.
+
+The project is therefore designed for both developer ergonomics and production-minded failure handling, while still remaining modular enough to evolve into a more distributed deployment model later.
+
 ## Documentation
 
 - Architecture and call-flow diagrams: `docs/architecture.md`
