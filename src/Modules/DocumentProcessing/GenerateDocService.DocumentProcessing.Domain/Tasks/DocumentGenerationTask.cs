@@ -20,12 +20,21 @@ public sealed class DocumentGenerationTask
     public string? ResultFileName { get; private set; }
     public string? ResultStoragePath { get; private set; }
     public string? Error { get; private set; }
+    public string? PendingMessageJson { get; private set; }
+    public int DispatchAttempts { get; private set; }
+    public DateTimeOffset? MessageSentAtUtc { get; private set; }
+    public DateTimeOffset? DispatchLockUntilUtc { get; private set; }
+    public Guid? DispatchLockId { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset? UpdatedAtUtc { get; private set; }
 
     public void MarkProcessing()
     {
         Status = GenerationTaskStatus.Processing;
+        PendingMessageJson = null;
+        MessageSentAtUtc = null;
+        DispatchLockUntilUtc = null;
+        DispatchLockId = null;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
     }
 
@@ -35,6 +44,10 @@ public sealed class DocumentGenerationTask
         ResultFileName = resultFileName;
         ResultStoragePath = resultStoragePath;
         Error = null;
+        PendingMessageJson = null;
+        MessageSentAtUtc = null;
+        DispatchLockUntilUtc = null;
+        DispatchLockId = null;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
     }
 
@@ -43,6 +56,17 @@ public sealed class DocumentGenerationTask
         Status = GenerationTaskStatus.Failed;
         ResultStoragePath = null;
         Error = error;
+        PendingMessageJson = null;
+        MessageSentAtUtc = null;
+        DispatchLockUntilUtc = null;
+        DispatchLockId = null;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
+    }
+
+    public void QueueMessageForDispatch(string messageJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(messageJson);
+        PendingMessageJson = messageJson;
+        MessageSentAtUtc = null;
     }
 }

@@ -140,6 +140,71 @@ public sealed class BackgroundDocumentGenerationProcessorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_ShouldIgnoreDuplicateDelivery_AfterTaskCompletes()
+    {
+        var repository = new InMemoryDocumentGenerationTaskRepository();
+        var publisher = new CapturingEventPublisher();
+        var engine = new FlakyEngine(null, failuresBeforeSuccess: 0);
+        using var metrics = new DocumentGenerationMetrics();
+        var processor = CreateProcessor(repository, new InMemoryGeneratedDocumentCache(), publisher, metrics, engine);
+        var task = await SeedTaskAsync(repository);
+        var message = CreateMessage(task.TaskId);
+
+        await processor.ProcessAsync(message);
+        await processor.ProcessAsync(message);
+
+        (await repository.GetAsync(task.TaskId))!.Status.Should().Be(GenerationTaskStatus.Completed);
+        engine.Calls.Should().Be(1);
+        publisher.Generated.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldKeepTaskCompleted_WhenGeneratedEventPublishingFails()
+    {
+        var repository = new InMemoryDocumentGenerationTaskRepository();
+        var publisher = new CapturingEventPublisher { GeneratedFailure = new IOException("broker unavailable") };
+        var engine = new FlakyEngine(null, failuresBeforeSuccess: 0);
+        using var metrics = new DocumentGenerationMetrics();
+        var processor = CreateProcessor(repository, new InMemoryGeneratedDocumentCache(), publisher, metrics, engine);
+        var task = await SeedTaskAsync(repository);
+
+        await processor.ProcessAsync(CreateMessage(task.TaskId));
+
+        var stored = await repository.GetAsync(task.TaskId);
+        stored!.Status.Should().Be(GenerationTaskStatus.Completed);
+        stored.ResultStoragePath.Should().NotBeNullOrWhiteSpace();
+        publisher.Failed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldComplete_WhenGeneratedDocumentCacheIsUnavailable()
+    {
+        var repository = new InMemoryDocumentGenerationTaskRepository();
+        var publisher = new CapturingEventPublisher();
+        var engine = new FlakyEngine(null, failuresBeforeSuccess: 0);
+        using var metrics = new DocumentGenerationMetrics();
+        var processor = CreateProcessor(
+            repository,
+            new UnavailableGeneratedDocumentCache(),
+            publisher,
+            metrics,
+            engine);
+        var task = await SeedTaskAsync(repository);
+
+        await processor.ProcessAsync(CreateMessage(
+            task.TaskId,
+            new Dictionary<string, string>
+            {
+                [DocumentRequestFingerprintProvider.MetadataKey] = "fingerprint-redis-down"
+            }));
+
+        var stored = await repository.GetAsync(task.TaskId);
+        stored!.Status.Should().Be(GenerationTaskStatus.Completed);
+        stored.ResultStoragePath.Should().NotBeNullOrWhiteSpace();
+        engine.Calls.Should().Be(1);
+    }
+
+    [Fact]
     public async Task ProcessAsync_ShouldThrow_WhenTaskIsUnknown()
     {
         var repository = new InMemoryDocumentGenerationTaskRepository();
@@ -216,9 +281,15 @@ public sealed class BackgroundDocumentGenerationProcessorTests
     {
         public List<DocumentGenerated> Generated { get; } = [];
         public List<DocumentGenerationFailed> Failed { get; } = [];
+        public Exception? GeneratedFailure { get; init; }
 
         public Task PublishGeneratedAsync(DocumentGenerated message, CancellationToken cancellationToken = default)
         {
+            if (GeneratedFailure is not null)
+            {
+                throw GeneratedFailure;
+            }
+
             Generated.Add(message);
             return Task.CompletedTask;
         }
@@ -228,6 +299,18 @@ public sealed class BackgroundDocumentGenerationProcessorTests
             Failed.Add(message);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class UnavailableGeneratedDocumentCache : IGeneratedDocumentCache
+    {
+        public Task<CachedGeneratedDocument?> GetAsync(string fingerprint, CancellationToken cancellationToken = default)
+            => throw new HttpRequestException("Redis unavailable");
+
+        public Task SetAsync(
+            string fingerprint,
+            CachedGeneratedDocument document,
+            CancellationToken cancellationToken = default)
+            => throw new HttpRequestException("Redis unavailable");
     }
 
     private sealed class FlakyEngine(Exception? failure, int failuresBeforeSuccess) : IDocumentGenerationEngine

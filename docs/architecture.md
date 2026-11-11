@@ -194,10 +194,11 @@ Behavior:
 - API accepts async request;
 - request is normalized and enriched with correlation metadata;
 - dedup fingerprint is created;
-- task is reserved and created;
-- message is scheduled through MassTransit;
+- task and serialized generation message are committed together when PostgreSQL is selected;
+- a PostgreSQL outbox dispatcher claims pending messages with a lease and sends them through MassTransit;
+- dispatch failures retry with backoff and eventually move the task to `Failed`;
 - background processor performs generation and artifact save;
-- task status is updated and events are published.
+- task status is updated and lifecycle events are published best-effort.
 
 ## 4.4 Caching and storage subsystem
 
@@ -221,11 +222,11 @@ No engine project directly references or calls Redis, MinIO, or MassTransit. Eng
 
 | Technology | Where it is used | How it is used |
 |------------|-----------------|----------------|
-| Redis (`StackExchange.Redis`) | Infrastructure caching adapters | Replaces `ICompiledTemplateCache`, `IGeneratedDocumentCache`, and `IGenerationRequestDeduplicationStore`. Compiled templates, completed document references, and request-deduplication reservations are keyed with configured prefixes and TTLs. |
+| Redis (`StackExchange.Redis`) | Infrastructure caching adapters | Replaces `ICompiledTemplateCache`, `IGeneratedDocumentCache`, and `IGenerationRequestDeduplicationStore`. Compiled templates and completed document references are best-effort caches; a transient cache outage is treated as a miss. Request-deduplication reservations remain fail-closed to avoid cross-instance duplicate work. |
 | MinIO (`Minio` .NET client) | `MinioDocumentArtifactStore` | Implements `IDocumentArtifactStore`. The worker writes generated files to the configured bucket under `{requestId}/{fileName}`; task records hold the resulting storage path, and the download endpoint reads the artifact through the same abstraction. |
-| MassTransit | Infrastructure messaging adapters | `MassTransitBackgroundGenerationScheduler` dispatches `GenerateDocumentRequested` to the configured RabbitMQ queue, or publishes it on the in-memory bus. The Worker consumes the message; generated/failed lifecycle events are published through `MassTransitDocumentGenerationEventPublisher`. |
+| MassTransit | Infrastructure messaging adapters | The PostgreSQL outbox dispatcher sends `GenerateDocumentRequested` to the configured RabbitMQ queue. A conditional database lease coordinates dispatchers in API/Worker hosts; the pending payload is cleared after broker acceptance. In-memory persistence submits directly. Generated/failed lifecycle events are published through `MassTransitDocumentGenerationEventPublisher`. |
 
-These adapters are not mandatory in every run. `appsettings.json` and Development settings select in-memory caching, messaging, and artifact storage by default. `deploy/docker/docker-compose.yml` configures Redis, RabbitMQ through MassTransit, MinIO, and PostgreSQL for both API and Worker. PostgreSQL stores task state; Redis does not replace the task repository.
+These adapters are not mandatory in every run. `appsettings.json` and Development settings select in-memory caching, messaging, storage, and persistence by default. `deploy/docker/docker-compose.yml` configures Redis, RabbitMQ through MassTransit, MinIO, and PostgreSQL for both API and Worker. PostgreSQL stores task state and the pending command payload atomically; Redis does not replace the task repository. The outbox is at-least-once, so the consumer claims a task atomically and ignores duplicate deliveries after a task has left `Queued`.
 
 ---
 
@@ -260,9 +261,14 @@ Client
        -> ResolveRequest()
        -> create request fingerprint
        -> reserve dedup entry
-       -> create task record
-       -> enqueue GenerateDocumentRequested through scheduler
+      -> persist task and outbox payload together
   -> API returns 202 Accepted + task status payload
+
+    Outbox dispatcher
+      -> lease pending outbox row
+      -> send GenerateDocumentRequested through MassTransit
+      -> clear pending payload after broker acceptance
+      -> retry with backoff; mark task Failed after the configured attempt limit
 
 Background consumer/processor
   -> receives GenerateDocumentRequested
@@ -281,7 +287,7 @@ Client
   -> GET /api/v1/tasks/{taskId}/download
 ```
 
-The sequence diagram for the Compose configuration (RabbitMQ, Redis, MinIO, and PostgreSQL) is in [async-generation-sequence.mmd](async-generation-sequence.mmd). The [MiniExcel async sequence](miniexcel-async-sequence.mmd) details the `json -> xlsx` path, including template and cache branches. With the default in-memory providers, the same application abstractions are used without those external services.
+The sequence diagram for the Compose configuration (RabbitMQ, Redis, MinIO, and PostgreSQL) is in [async-generation-sequence.mmd](async-generation-sequence.mmd). The [MiniExcel async sequence](miniexcel-async-sequence.mmd) details the `json -> xlsx` path, including outbox dispatch, template and cache branches. With the default in-memory providers, the same application abstractions are used without those external services or the PostgreSQL outbox.
 
 ## 5.3 Auto-selection flow
 

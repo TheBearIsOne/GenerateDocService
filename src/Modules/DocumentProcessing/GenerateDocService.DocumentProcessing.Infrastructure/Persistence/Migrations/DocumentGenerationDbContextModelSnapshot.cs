@@ -33,6 +33,20 @@ namespace GenerateDocService.DocumentProcessing.Infrastructure.Persistence.Migra
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
+                    b.Property<int>("DispatchAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("dispatch_attempts");
+
+                    b.Property<Guid?>("DispatchLockId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("dispatch_lock_id");
+
+                    b.Property<DateTimeOffset?>("DispatchLockUntilUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatch_lock_until_utc");
+
                     b.Property<string>("Engine")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -43,11 +57,19 @@ namespace GenerateDocService.DocumentProcessing.Infrastructure.Persistence.Migra
                         .HasColumnType("text")
                         .HasColumnName("error");
 
+                    b.Property<DateTimeOffset?>("MessageSentAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("message_sent_at_utc");
+
                     b.Property<string>("OutputFormat")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("output_format");
+
+                    b.Property<string>("PendingMessageJson")
+                        .HasColumnType("text")
+                        .HasColumnName("pending_message_json");
 
                     b.Property<string>("RequestId")
                         .IsRequired()
@@ -74,6 +96,9 @@ namespace GenerateDocService.DocumentProcessing.Infrastructure.Persistence.Migra
                         .HasColumnName("updated_at_utc");
 
                     b.HasKey("TaskId");
+
+                    b.HasIndex("Status", "CreatedAtUtc")
+                        .HasDatabaseName("ix_document_generation_tasks_status_created_at_utc");
 
                     b.ToTable("document_generation_tasks", (string)null);
                 });

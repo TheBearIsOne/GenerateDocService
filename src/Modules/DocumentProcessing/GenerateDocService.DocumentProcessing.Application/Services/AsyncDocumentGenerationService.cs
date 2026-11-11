@@ -12,7 +12,7 @@ public sealed class AsyncDocumentGenerationService(
     IGenerationRequestDeduplicationStore deduplicationStore,
     IDocumentGenerationEngineRegistry registry,
     IDocumentGenerationTaskRepository repository,
-    IBackgroundGenerationScheduler scheduler,
+    IAsyncDocumentGenerationSubmission submission,
     DocumentGenerationMetrics metrics)
 {
     public async Task<TaskStatusResponse> EnqueueAsync(GenerateDocumentRequest request, CancellationToken cancellationToken = default)
@@ -55,12 +55,11 @@ public sealed class AsyncDocumentGenerationService(
 
         try
         {
-            await repository.AddAsync(task, cancellationToken);
-            await scheduler.EnqueueAsync(ToMessage(task.TaskId, enrichedRequest), cancellationToken);
+            await submission.SubmitAsync(task, ToMessage(task.TaskId, enrichedRequest), cancellationToken);
         }
         catch
         {
-            await deduplicationStore.ReleaseAsync(fingerprint, task.TaskId, cancellationToken);
+            await deduplicationStore.ReleaseAsync(fingerprint, task.TaskId, CancellationToken.None);
             throw;
         }
 

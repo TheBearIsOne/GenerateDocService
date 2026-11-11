@@ -197,7 +197,11 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddSingleton<IConnectionMultiplexer>(_ =>
-            ConnectionMultiplexer.Connect(cacheOptions.Redis.ConnectionString));
+        {
+            var redisOptions = ConfigurationOptions.Parse(cacheOptions.Redis.ConnectionString);
+            redisOptions.AbortOnConnectFail = false;
+            return ConnectionMultiplexer.Connect(redisOptions);
+        });
 
         services.Replace(ServiceDescriptor.Singleton<ICompiledTemplateCache, RedisCompiledTemplateCache>());
         services.Replace(ServiceDescriptor.Singleton<IGeneratedDocumentCache, RedisGeneratedDocumentCache>());
@@ -331,8 +335,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<
             Application.Abstractions.Persistence.IDocumentGenerationTaskRepository,
             PostgreSqlDocumentGenerationTaskRepository>();
+        services.Replace(ServiceDescriptor.Scoped<
+            IAsyncDocumentGenerationSubmission,
+            PostgreSqlAsyncDocumentGenerationSubmission>());
 
         services.AddHostedService<ArtifactCleanupBackgroundService>();
+        services.AddHostedService<PostgreSqlDocumentGenerationOutboxDispatcher>();
 
         return services;
     }
@@ -381,11 +389,8 @@ public static class ServiceCollectionExtensions
 
         if (persistenceOptions.IsPostgreSqlProvider())
         {
-            healthChecks.AddCheck(
+            healthChecks.AddCheck<PostgreSqlConnectionHealthCheck>(
                 "postgresql-persistence",
-                () => new HealthCheckResult(
-                    HealthStatus.Healthy,
-                    "PostgreSQL persistence configured."),
                 tags: ["ready"]);
         }
         else
@@ -418,10 +423,8 @@ public static class ServiceCollectionExtensions
 
         if (storageOptions.IsObjectStorageProvider())
         {
-            var endpoint = BuildMinioEndpoint(storageOptions.ObjectStorage.Endpoint);
-            healthChecks.AddCheck(
+            healthChecks.AddCheck<MinioBucketHealthCheck>(
                 "object-storage",
-                new TcpEndpointHealthCheck(endpoint.Host, endpoint.Port),
                 tags: ["ready"]);
         }
         else

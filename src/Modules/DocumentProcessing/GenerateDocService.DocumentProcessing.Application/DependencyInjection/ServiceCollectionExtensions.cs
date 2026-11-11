@@ -23,6 +23,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<Resilience.TransientFailureClassifier>(_ => new Resilience.TransientFailureClassifier());
         services.AddScoped<Abstractions.Messaging.IBackgroundDocumentGenerationProcessor, Services.BackgroundDocumentGenerationProcessor>();
         services.AddSingleton<Abstractions.Messaging.IBackgroundGenerationScheduler, Services.InMemoryBackgroundGenerationScheduler>();
+        services.AddScoped<Abstractions.Messaging.IAsyncDocumentGenerationSubmission, Services.InMemoryAsyncDocumentGenerationSubmission>();
         services.AddSingleton<Services.DocumentGenerationMetrics>();
         services.AddScoped<Services.SyncDocumentGenerationService>();
         services.AddScoped<Services.AsyncDocumentGenerationService>();

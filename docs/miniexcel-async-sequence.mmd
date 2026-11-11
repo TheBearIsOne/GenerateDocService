@@ -4,6 +4,7 @@ sequenceDiagram
     participant API as GenerateDocService API
     participant Redis
     participant DB as PostgreSQL task store
+    participant Outbox as Outbox dispatcher
     participant MQ as RabbitMQ via MassTransit
     participant Worker
     participant Engine as MiniExcel engine
@@ -12,10 +13,13 @@ sequenceDiagram
     Client->>API: POST /api/v1/documents/async (engine=miniexcel, json to xlsx)
     API->>API: Validate request and map payload/template bytes
     API->>Redis: Reserve request fingerprint
-    API->>DB: Create task (Queued)
-    API->>MQ: Send GenerateDocumentRequested
+    API->>DB: Commit task and outbox payload atomically
     API-->>Client: 202 Accepted with taskId
 
+    Outbox->>DB: Claim pending message with lease
+    Outbox->>MQ: Send GenerateDocumentRequested
+    MQ-->>Outbox: Broker accepted message
+    Outbox->>DB: Clear pending payload
     MQ->>Worker: Deliver generation request
     Worker->>DB: Load task and set Processing
     Worker->>Redis: Lookup generated document by fingerprint
