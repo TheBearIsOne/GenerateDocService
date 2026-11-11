@@ -172,7 +172,7 @@ static List<EngineExample> BuildExamples()
             "2",
             "scriban",
             "json -> txt",
-            "Template rendering, then the full async submit/poll/download flow",
+            "Template rendering through sync and async submit/poll/download flows",
             async client =>
             {
                 var request = TextRequest(
@@ -180,7 +180,6 @@ static List<EngineExample> BuildExamples()
                     "Document: {{ document }} for {{ customer.name }}");
 
                 await RunSyncAsync(client, request, "scriban text");
-                await RunAsyncFlowAsync(client, request, "scriban text");
             }),
 
         new EngineExample(
@@ -499,16 +498,18 @@ static async Task RunSyncAsync(HttpClient httpClient, GenerateDocumentHttpReques
         {
             await PrintBodyAsync(response);
             Console.WriteLine();
-            return;
         }
-
-        await ReportContentAsync(response, $"document.{request.OutputFormat}");
+        else
+        {
+            await ReportContentAsync(response, $"document.{request.OutputFormat}");
+        }
     }
     catch (HttpRequestException exception)
     {
         Console.WriteLine($"Request failed: {exception.Message}");
     }
 
+    await RunAsyncFlowAsync(httpClient, request, scenario);
     Console.WriteLine();
 }
 

@@ -7,6 +7,7 @@ namespace GenerateDocService.DocumentProcessing.Application.Services;
 public sealed class InMemoryDocumentGenerationTaskRepository : IDocumentGenerationTaskRepository
 {
     private readonly ConcurrentDictionary<string, DocumentGenerationTask> _tasks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _taskLock = new();
 
     public Task<DocumentGenerationTask> AddAsync(DocumentGenerationTask task, CancellationToken cancellationToken = default)
     {
@@ -18,6 +19,20 @@ public sealed class InMemoryDocumentGenerationTaskRepository : IDocumentGenerati
     {
         _tasks.TryGetValue(taskId, out var task);
         return Task.FromResult(task);
+    }
+
+    public Task<bool> TryMarkProcessingAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        lock (_taskLock)
+        {
+            if (!_tasks.TryGetValue(taskId, out var task) || task.Status != GenerationTaskStatus.Queued)
+            {
+                return Task.FromResult(false);
+            }
+
+            task.MarkProcessing();
+            return Task.FromResult(true);
+        }
     }
 
     public Task UpdateAsync(DocumentGenerationTask task, CancellationToken cancellationToken = default)

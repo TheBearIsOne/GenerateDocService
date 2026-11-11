@@ -50,11 +50,30 @@ public sealed class DocumentGenerationDbContext : DbContext
             entity.Property(e => e.Error)
                 .HasColumnName("error");
 
+            entity.Property(e => e.PendingMessageJson)
+                .HasColumnName("pending_message_json");
+
+            entity.Property(e => e.DispatchAttempts)
+                .HasColumnName("dispatch_attempts")
+                .HasDefaultValue(0);
+
+            entity.Property(e => e.MessageSentAtUtc)
+                .HasColumnName("message_sent_at_utc");
+
+            entity.Property(e => e.DispatchLockUntilUtc)
+                .HasColumnName("dispatch_lock_until_utc");
+
+            entity.Property(e => e.DispatchLockId)
+                .HasColumnName("dispatch_lock_id");
+
             entity.Property(e => e.CreatedAtUtc)
                 .HasColumnName("created_at_utc");
 
             entity.Property(e => e.UpdatedAtUtc)
                 .HasColumnName("updated_at_utc");
+
+            entity.HasIndex(e => new { e.Status, e.CreatedAtUtc })
+                .HasDatabaseName("ix_document_generation_tasks_status_created_at_utc");
         });
     }
 }

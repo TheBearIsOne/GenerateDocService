@@ -27,7 +27,24 @@ public sealed class PostgreSqlDocumentGenerationTaskRepository : IDocumentGenera
         CancellationToken cancellationToken = default)
     {
         return await _dbContext.DocumentGenerationTasks
+            .AsNoTracking()
             .FirstOrDefaultAsync(e => e.TaskId == taskId, cancellationToken);
+    }
+
+    public async Task<bool> TryMarkProcessingAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        var updatedAtUtc = DateTimeOffset.UtcNow;
+        var updatedRows = await _dbContext.DocumentGenerationTasks
+            .Where(e => e.TaskId == taskId && e.Status == GenerationTaskStatus.Queued)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(e => e.Status, GenerationTaskStatus.Processing)
+                .SetProperty(e => e.UpdatedAtUtc, updatedAtUtc)
+                .SetProperty(e => e.PendingMessageJson, (string?)null)
+                .SetProperty(e => e.MessageSentAtUtc, (DateTimeOffset?)null)
+                .SetProperty(e => e.DispatchLockId, (Guid?)null)
+                .SetProperty(e => e.DispatchLockUntilUtc, (DateTimeOffset?)null), cancellationToken);
+
+        return updatedRows == 1;
     }
 
     public async Task UpdateAsync(

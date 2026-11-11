@@ -7,6 +7,7 @@ using GenerateDocService.DocumentProcessing.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
 
 namespace GenerateDocService.Api.IntegrationTests;
@@ -19,6 +20,7 @@ namespace GenerateDocService.Api.IntegrationTests;
 public sealed class RabbitMqGenerationPipelineFixture : IAsyncLifetime
 {
     private RabbitMqContainer? _container;
+    private PostgreSqlContainer? _postgresContainer;
 
     public IHost? Host { get; private set; }
 
@@ -31,11 +33,23 @@ public sealed class RabbitMqGenerationPipelineFixture : IAsyncLifetime
             // Pinned to the same image the compose stack runs.
             _container = new RabbitMqBuilder("rabbitmq:3-management").Build();
             await _container.StartAsync();
+            _postgresContainer = new PostgreSqlBuilder("postgres:17").Build();
+            await _postgresContainer.StartAsync();
         }
         catch (Exception exception)
         {
             UnavailabilityReason =
-                $"RabbitMQ container could not start: {exception.GetType().Name}: {exception.Message}";
+                $"RabbitMQ/PostgreSQL containers could not start: {exception.GetType().Name}: {exception.Message}";
+            if (_container is not null)
+            {
+                await _container.DisposeAsync();
+            }
+
+            if (_postgresContainer is not null)
+            {
+                await _postgresContainer.DisposeAsync();
+            }
+
             return;
         }
 
@@ -51,12 +65,15 @@ public sealed class RabbitMqGenerationPipelineFixture : IAsyncLifetime
             ["DocumentProcessing:Messaging:RabbitMq:Port"] = endpoint.Port.ToString(),
             ["DocumentProcessing:Messaging:RabbitMq:VirtualHost"] = "/",
             ["DocumentProcessing:Messaging:RabbitMq:Username"] = Uri.UnescapeDataString(credentials[0]),
-            ["DocumentProcessing:Messaging:RabbitMq:Password"] = Uri.UnescapeDataString(credentials.Length > 1 ? credentials[1] : string.Empty)
+            ["DocumentProcessing:Messaging:RabbitMq:Password"] = Uri.UnescapeDataString(credentials.Length > 1 ? credentials[1] : string.Empty),
+            ["DocumentProcessing:Persistence:Provider"] = "PostgreSql",
+            ["DocumentProcessing:Persistence:PostgreSql:ConnectionString"] = _postgresContainer.GetConnectionString()
         });
 
         builder.Services.AddDocumentProcessingInfrastructure(builder.Configuration);
 
         Host = builder.Build();
+    await Host.Services.ApplyDocumentProcessingMigrationsAsync(builder.Configuration);
         await Host.StartAsync();
     }
 
@@ -71,6 +88,11 @@ public sealed class RabbitMqGenerationPipelineFixture : IAsyncLifetime
         if (_container is not null)
         {
             await _container.DisposeAsync();
+        }
+
+        if (_postgresContainer is not null)
+        {
+            await _postgresContainer.DisposeAsync();
         }
     }
 }
@@ -110,6 +132,11 @@ public sealed class RabbitMqGenerationPipelineIntegrationTests : IClassFixture<R
             "the receive endpoint must be bound to DocumentProcessing:Messaging:QueueName, not the convention-derived message name");
         final.ResultFileName.Should().EndWith(".txt");
         final.Error.Should().BeNull();
+
+        var persistedTask = await scope.ServiceProvider
+            .GetRequiredService<GenerateDocService.DocumentProcessing.Application.Abstractions.Persistence.IDocumentGenerationTaskRepository>()
+            .GetAsync(accepted.TaskId);
+        persistedTask!.PendingMessageJson.Should().BeNull("the RabbitMQ send has been acknowledged and the outbox row should be cleared");
     }
 
     private static async Task<TaskStatusResponse> WaitForFinalStatusAsync(

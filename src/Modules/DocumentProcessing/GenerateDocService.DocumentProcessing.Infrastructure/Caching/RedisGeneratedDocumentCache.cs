@@ -20,7 +20,14 @@ public sealed class RedisGeneratedDocumentCache(
             return null;
         }
 
-        return JsonSerializer.Deserialize<CachedGeneratedDocument>((string)value!);
+        try
+        {
+            return JsonSerializer.Deserialize<CachedGeneratedDocument>((string)value!);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public Task SetAsync(string fingerprint, CachedGeneratedDocument document, CancellationToken cancellationToken = default)

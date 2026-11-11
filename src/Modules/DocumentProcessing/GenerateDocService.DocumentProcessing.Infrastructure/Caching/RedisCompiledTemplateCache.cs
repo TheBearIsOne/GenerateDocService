@@ -14,13 +14,29 @@ public sealed class RedisCompiledTemplateCache(
     {
         var database = connectionMultiplexer.GetDatabase();
         var key = BuildKey(cacheKey);
-        var value = await database.StringGetAsync(key);
+        RedisValue value;
+        try
+        {
+            value = await database.StringGetAsync(key);
+        }
+        catch (Exception exception) when (exception is RedisException or TimeoutException)
+        {
+            return null;
+        }
         if (!value.HasValue)
         {
             return null;
         }
 
-        var cachedTemplate = JsonSerializer.Deserialize<CachedCompiledTemplate>((string)value!);
+        CachedCompiledTemplate? cachedTemplate;
+        try
+        {
+            cachedTemplate = JsonSerializer.Deserialize<CachedCompiledTemplate>((string)value!);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
         if (cachedTemplate is null)
         {
             return null;
@@ -55,7 +71,18 @@ public sealed class RedisCompiledTemplateCache(
             ? ttl
             : TimeSpan.FromMinutes(options.Value.Redis.CompiledTemplateTtlMinutes);
         var payload = JsonSerializer.Serialize(cachedTemplate);
-        return database.StringSetAsync(key, payload, effectiveTtl);
+        return SetIfAvailableAsync(database, key, payload, effectiveTtl);
+    }
+
+    private static async Task SetIfAvailableAsync(IDatabase database, RedisKey key, string payload, TimeSpan ttl)
+    {
+        try
+        {
+            await database.StringSetAsync(key, payload, ttl);
+        }
+        catch (Exception exception) when (exception is RedisException or TimeoutException)
+        {
+        }
     }
 
     private string BuildKey(string cacheKey)

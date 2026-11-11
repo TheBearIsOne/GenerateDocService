@@ -7,6 +7,7 @@ using GenerateDocService.DocumentProcessing.Application.Abstractions.Storage;
 using GenerateDocService.DocumentProcessing.Application.Messaging;
 using GenerateDocService.DocumentProcessing.Application.Models;
 using GenerateDocService.DocumentProcessing.Application.Resilience;
+using GenerateDocService.DocumentProcessing.Domain.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -28,6 +29,19 @@ public sealed class BackgroundDocumentGenerationProcessor(
         var task = await repository.GetAsync(message.TaskId, cancellationToken)
             ?? throw new InvalidOperationException($"Document generation task '{message.TaskId}' was not found.");
 
+        if (task.Status is GenerationTaskStatus.Completed or GenerationTaskStatus.Failed)
+        {
+            return;
+        }
+
+        if (!await repository.TryMarkProcessingAsync(message.TaskId, cancellationToken))
+        {
+            return;
+        }
+
+        task = await repository.GetAsync(message.TaskId, cancellationToken)
+            ?? throw new InvalidOperationException($"Document generation task '{message.TaskId}' was not found after claiming it.");
+
         var options = resilienceOptions.Value;
         var maxAttempts = Math.Max(1, options.MaxAttempts);
         var stopwatch = Stopwatch.StartNew();
@@ -37,9 +51,6 @@ public sealed class BackgroundDocumentGenerationProcessor(
         {
             deadline.CancelAfter(TimeSpan.FromSeconds(options.ProcessingTimeoutSeconds));
         }
-
-        task.MarkProcessing();
-        await repository.UpdateAsync(task, cancellationToken);
 
         for (var attempt = 1; ; attempt++)
         {
@@ -81,7 +92,7 @@ public sealed class BackgroundDocumentGenerationProcessor(
                 task.MarkFailed(error);
                 await repository.UpdateAsync(task, cancellationToken);
 
-                await eventPublisher.PublishFailedAsync(
+                await TryPublishFailedAsync(
                     new DocumentGenerationFailed(
                         message.TaskId,
                         message.CorrelationId,
@@ -110,7 +121,17 @@ public sealed class BackgroundDocumentGenerationProcessor(
 
         if (!string.IsNullOrWhiteSpace(fingerprint))
         {
-            var cachedDocument = await documentCache.GetAsync(fingerprint, attemptToken);
+            CachedGeneratedDocument? cachedDocument;
+            try
+            {
+                cachedDocument = await documentCache.GetAsync(fingerprint, attemptToken);
+            }
+            catch (Exception exception) when (failureClassifier.IsTransient(exception))
+            {
+                logger.LogWarning(exception, "Generated document cache is unavailable for task {TaskId}; generating without cache", task.TaskId);
+                cachedDocument = null;
+            }
+
             if (cachedDocument is not null)
             {
                 task.MarkCompleted(cachedDocument.FileName, cachedDocument.Artifact.StoragePath);
@@ -119,7 +140,7 @@ public sealed class BackgroundDocumentGenerationProcessor(
                 stopwatch.Stop();
                 metrics.RecordCompleted(message.Engine, cachedDocument.OutputFormat, stopwatch.Elapsed);
 
-                await eventPublisher.PublishGeneratedAsync(
+                await TryPublishGeneratedAsync(
                     new DocumentGenerated(
                         message.TaskId,
                         message.CorrelationId,
@@ -145,10 +166,17 @@ public sealed class BackgroundDocumentGenerationProcessor(
 
         if (!string.IsNullOrWhiteSpace(fingerprint))
         {
-            await documentCache.SetAsync(
-                fingerprint,
-                CachedGeneratedDocument.FromResult(result, artifact),
-                attemptToken);
+            try
+            {
+                await documentCache.SetAsync(
+                    fingerprint,
+                    CachedGeneratedDocument.FromResult(result, artifact),
+                    attemptToken);
+            }
+            catch (Exception exception) when (failureClassifier.IsTransient(exception))
+            {
+                logger.LogWarning(exception, "Generated document cache is unavailable for task {TaskId}; continuing without cache", task.TaskId);
+            }
         }
 
         task.MarkCompleted(result.FileName, artifact.StoragePath);
@@ -157,7 +185,7 @@ public sealed class BackgroundDocumentGenerationProcessor(
         stopwatch.Stop();
         metrics.RecordCompleted(message.Engine, result.OutputFormat, stopwatch.Elapsed);
 
-        await eventPublisher.PublishGeneratedAsync(
+        await TryPublishGeneratedAsync(
             new DocumentGenerated(
                 message.TaskId,
                 message.CorrelationId,
@@ -172,6 +200,30 @@ public sealed class BackgroundDocumentGenerationProcessor(
                 result.Metadata,
                 DateTimeOffset.UtcNow),
             attemptToken);
+    }
+
+    private async Task TryPublishGeneratedAsync(DocumentGenerated message, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await eventPublisher.PublishGeneratedAsync(message, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Task {TaskId} completed, but its generated event could not be published", message.TaskId);
+        }
+    }
+
+    private async Task TryPublishFailedAsync(DocumentGenerationFailed message, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await eventPublisher.PublishFailedAsync(message, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Task {TaskId} failed, but its failure event could not be published", message.TaskId);
+        }
     }
 
     private static string BuildError(Exception exception, CancellationTokenSource deadline, CancellationToken callerToken)

@@ -102,4 +102,30 @@ public sealed class PostgreSqlTaskRepositoryIntegrationTests : IClassFixture<Pos
         using var cleanup = _fixture.Services!.CreateScope();
         await cleanup.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>().DeleteAsync(taskId);
     }
+
+    [SkippableFact]
+    [Trait("Category", "RequiresDocker")]
+    public async Task TryMarkProcessing_ShouldAllowOnlyOneConcurrentClaim()
+    {
+        Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
+
+        var taskId = $"claim-{Guid.NewGuid():N}";
+        using (var setupScope = _fixture.Services!.CreateScope())
+        {
+            var repository = setupScope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>();
+            await repository.AddAsync(new DocumentGenerationTask(taskId, "req-claim", "scriban", "txt"));
+        }
+
+        var claims = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
+        {
+            using var scope = _fixture.Services!.CreateScope();
+            var repository = scope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>();
+            return await repository.TryMarkProcessingAsync(taskId);
+        }));
+
+        claims.Count(claimed => claimed).Should().Be(1);
+
+        using var cleanupScope = _fixture.Services!.CreateScope();
+        await cleanupScope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>().DeleteAsync(taskId);
+    }
 }
