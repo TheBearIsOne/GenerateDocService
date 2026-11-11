@@ -150,15 +150,6 @@ while (true)
 static List<EngineExample> BuildExamples()
 {
     const string customerPayload = """{"document":"hello","customer":{"name":"Ada Lovelace"}}""";
-
-    /*
-    File.WriteAllBytes("template.docx", OfficeFixtures.CreateXlsxTemplateRows(
-                        ["{{title}}"],
-                        ["Customer:", "{{customer}}", "Date:", "{{date}}"],
-                        ["Item", "Qty", "Unit price"],
-                        ["{{items.name}}", "{{items.qty}}", "{{items.price}}"]));
-    */
-
     return
     [
         new EngineExample(
