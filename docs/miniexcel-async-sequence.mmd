@@ -1,0 +1,63 @@
+sequenceDiagram
+    autonumber
+    actor Client
+    participant API as GenerateDocService API
+    participant Redis
+    participant DB as PostgreSQL task store
+    participant MQ as RabbitMQ via MassTransit
+    participant Worker
+    participant Engine as MiniExcel engine
+    participant MinIO
+
+    Client->>API: POST /api/v1/documents/async (engine=miniexcel, json to xlsx)
+    API->>API: Validate request and map payload/template bytes
+    API->>Redis: Reserve request fingerprint
+    API->>DB: Create task (Queued)
+    API->>MQ: Send GenerateDocumentRequested
+    API-->>Client: 202 Accepted with taskId
+
+    MQ->>Worker: Deliver generation request
+    Worker->>DB: Load task and set Processing
+    Worker->>Redis: Lookup generated document by fingerprint
+    alt Cache hit
+        Redis-->>Worker: Cached document metadata and artifact path
+        Worker->>DB: Set Completed with cached result
+        Worker->>MQ: Publish DocumentGenerated
+    else Cache miss
+        Worker->>Engine: GenerateAsync(json, optional xlsx template)
+        alt XLSX template supplied
+            Engine->>Engine: Parse JSON object and call SaveAsByTemplate
+        else No template
+            Engine->>Engine: Convert JSON rows and call SaveAs
+        end
+        alt Generation and artifact save succeed
+            Engine-->>Worker: {requestId}.xlsx
+            Worker->>MinIO: Save XLSX artifact
+            MinIO-->>Worker: Artifact storage path
+            Worker->>Redis: Cache generated document metadata and artifact reference
+            Worker->>DB: Set Completed with result and artifact path
+            Worker->>MQ: Publish DocumentGenerated
+        else Failure after retries
+            Engine-->>Worker: Generation error
+            Worker->>DB: Set Failed with error
+            Worker->>MQ: Publish DocumentGenerationFailed
+        end
+    end
+
+    loop Poll until Completed or Failed
+        Client->>API: GET /api/v1/tasks/{taskId}
+        API->>DB: Read task status
+        DB-->>API: Current task status
+        API-->>Client: Status and download URL when completed
+    end
+
+    alt Task completed
+        Client->>API: GET /api/v1/tasks/{taskId}/download
+        API->>DB: Read task and artifact path
+        DB-->>API: Artifact storage path
+        API->>MinIO: Read artifact through IDocumentArtifactStore
+        MinIO-->>API: XLSX bytes
+        API-->>Client: 200 OK with .xlsx file
+    else Task failed
+        Client-->>Client: Display task error from status response
+    end

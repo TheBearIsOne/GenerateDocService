@@ -50,6 +50,14 @@ This is already beyond a scaffold: the repository is a working service foundatio
   - JSON-to-PDF engine.
 - `src/Engines/GenerateDocService.Engine.Fop`
   - HTTP adapter for FO/XSL-FO-to-PDF conversion through the external FOP Converter API.
+- `src/Engines/GenerateDocService.Engine.QuestPdf`
+  - JSON-to-PDF generation with QuestPDF.
+- `src/Engines/GenerateDocService.Engine.MiniExcel`
+  - XLSX generation and template population with MiniExcel.
+- `src/Engines/GenerateDocService.Engine.MiniWord`
+  - DOCX template population with the Open XML SDK.
+- `src/Engines/GenerateDocService.Engine.MiniPdf`
+  - XLSX-to-PDF conversion using MiniExcel and PDF rendering libraries.
 
 ## 2.4 Tests
 
@@ -207,6 +215,18 @@ Behavior:
 - generated document cache can short-circuit repeated generation;
 - artifact storage is abstracted away from the task model.
 
+## 4.5 Infrastructure technology usage
+
+No engine project directly references or calls Redis, MinIO, or MassTransit. Engines receive requests through `IDocumentGenerationEngine` and return results; shared application services use cache, storage, and messaging abstractions. Scriban and DotLiquid template parsers do use `ICompiledTemplateCache`, which can be backed by Redis when that provider is selected. MinIO artifact storage and MassTransit messaging remain outside the engine calls. The Infrastructure project registers the selected implementations for both API and Worker hosts.
+
+| Technology | Where it is used | How it is used |
+|------------|-----------------|----------------|
+| Redis (`StackExchange.Redis`) | Infrastructure caching adapters | Replaces `ICompiledTemplateCache`, `IGeneratedDocumentCache`, and `IGenerationRequestDeduplicationStore`. Compiled templates, completed document references, and request-deduplication reservations are keyed with configured prefixes and TTLs. |
+| MinIO (`Minio` .NET client) | `MinioDocumentArtifactStore` | Implements `IDocumentArtifactStore`. The worker writes generated files to the configured bucket under `{requestId}/{fileName}`; task records hold the resulting storage path, and the download endpoint reads the artifact through the same abstraction. |
+| MassTransit | Infrastructure messaging adapters | `MassTransitBackgroundGenerationScheduler` dispatches `GenerateDocumentRequested` to the configured RabbitMQ queue, or publishes it on the in-memory bus. The Worker consumes the message; generated/failed lifecycle events are published through `MassTransitDocumentGenerationEventPublisher`. |
+
+These adapters are not mandatory in every run. `appsettings.json` and Development settings select in-memory caching, messaging, and artifact storage by default. `deploy/docker/docker-compose.yml` configures Redis, RabbitMQ through MassTransit, MinIO, and PostgreSQL for both API and Worker. PostgreSQL stores task state; Redis does not replace the task repository.
+
 ---
 
 ## 5. Runtime call flows
@@ -261,6 +281,8 @@ Client
   -> GET /api/v1/tasks/{taskId}/download
 ```
 
+The sequence diagram for the Compose configuration (RabbitMQ, Redis, MinIO, and PostgreSQL) is in [async-generation-sequence.mmd](async-generation-sequence.mmd). The [MiniExcel async sequence](miniexcel-async-sequence.mmd) details the `json -> xlsx` path, including template and cache branches. With the default in-memory providers, the same application abstractions are used without those external services.
+
 ## 5.3 Auto-selection flow
 
 ```text
@@ -292,28 +314,29 @@ The application can run in lightweight mode or more production-like mode.
 ### 6.1 Caching providers
 
 - InMemory
-- Redis
+- Redis (`ICompiledTemplateCache`, `IGeneratedDocumentCache`, and `IGenerationRequestDeduplicationStore`)
 
 ### 6.2 Messaging transports
 
 - InMemory
-- RabbitMQ via MassTransit
+- RabbitMQ via MassTransit (`GenerateDocumentRequested` queue and generation lifecycle events)
 
 ### 6.3 Artifact storage providers
 
 - InMemory
-- ObjectStorage via MinIO
+- ObjectStorage via MinIO (`IDocumentArtifactStore`)
 
 ### 6.4 Local docker stack
 
 `deploy/docker/docker-compose.yml` starts:
 
-- API
+- API and Worker
 - RabbitMQ
 - Redis
 - MinIO
+- PostgreSQL
 
-This is a practical local environment for integration and baseline testing.
+The stack configures both API and Worker to use these external providers. The FOP converter is external to this Compose file and is configured separately.
 
 ---
 

@@ -1,0 +1,54 @@
+sequenceDiagram
+    autonumber
+    actor Client
+    participant API as GenerateDocService API
+    participant Redis
+    participant DB as PostgreSQL task store
+    participant MQ as RabbitMQ via MassTransit
+    participant Worker
+    participant Engine as Selected document engine
+    participant MinIO
+
+    Client->>API: POST /api/v1/documents/async
+    API->>Redis: Reserve request fingerprint
+    API->>DB: Create task (Queued)
+    API->>MQ: Send GenerateDocumentRequested
+    API-->>Client: 202 Accepted + taskId
+
+    MQ->>Worker: Deliver generation request
+    Worker->>DB: Load task, set Processing
+    Worker->>Redis: Lookup generated document by fingerprint
+    alt Generation succeeds
+        alt Cached document exists
+            Redis-->>Worker: Cached document and artifact reference
+        else Cache miss
+            Worker->>Engine: GenerateAsync(request)
+            Engine-->>Worker: Generated document
+            Worker->>MinIO: Save artifact
+            MinIO-->>Worker: Artifact storage path
+            Worker->>Redis: Cache generated document and artifact reference
+        end
+        Worker->>DB: Set Completed with artifact path
+        Worker->>MQ: Publish DocumentGenerated
+    else Generation fails after retries
+        Worker->>DB: Set Failed with error
+        Worker->>MQ: Publish DocumentGenerationFailed
+    end
+
+    loop Poll until Completed or Failed
+        Client->>API: GET /api/v1/tasks/{taskId}
+        API->>DB: Read task status
+        DB-->>API: Current task status
+        API-->>Client: Status and download URL when complete
+    end
+
+    alt Task completed
+        Client->>API: GET /api/v1/tasks/{taskId}/download
+        API->>DB: Read completed task and artifact path
+        DB-->>API: Artifact storage path
+        API->>MinIO: Read artifact through IDocumentArtifactStore
+        MinIO-->>API: Generated file
+        API-->>Client: 200 OK + document bytes
+    else Task failed
+        Client-->>Client: Display task error
+    end
