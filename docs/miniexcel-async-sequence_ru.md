@@ -22,4 +22,4 @@ PostgreSQL хранит **состояние async-задачи**, а не са�
 > **Примечание:** PostgreSQL используется, когда выбран провайдер `PostgreSql` — в частности, в Docker Compose. При настройке `InMemory` постоянного хранения task-записей в PostgreSQL нет.
 
 ### Схема
-[miniexcel-async-sequence](/docs/miniexcel-async-sequence.mmd)
+[miniexcel-async-sequence](/docs/miniexcel-async-sequence-sc.mmd)

@@ -7,7 +7,9 @@
 5. The worker saves the XLSX file to MinIO, stores the result details in Redis, and updates the task status to `Completed` in PostgreSQL, along with the file path. If an error occurs, the system attempts retries; if these fail, the task is marked as `Failed`.
 6. The client polls the `GET /api/v1/tasks/{taskId}` endpoint. Upon success, the client receives a link and downloads the file via `GET /api/v1/tasks/{taskId}/download`, at which point the API retrieves the file from MinIO.
 
-> **Note:** There are two distinct checks involving Redis: the first prevents the redundant execution of identical requests, while the second allows for the reuse of an already generated document. Status polling retrieves the current state of the task from PostgreSQL. The asynchronous mode offloads the generation process to a worker; within this background process, MiniExcel performs the actual generation synchronously. # The Role of PostgreSQL in Async Tasks
+> **Note:** There are two distinct checks involving Redis: the first prevents the redundant execution of identical requests, while the second allows for the reuse of an already generated document. Status polling retrieves the current state of the task from PostgreSQL. The asynchronous mode offloads the generation process to a worker; within this background process, MiniExcel performs the actual generation synchronously.
+
+# The Role of PostgreSQL in Async Tasks
 
 PostgreSQL stores the **state of an async task**, rather than the XLSX file itself:
 
@@ -20,4 +22,4 @@ This allows both the API and the worker to access a consistent, persistent state
 > **Note:** PostgreSQL is used when the `PostgreSql` provider is selected—for instance, in a Docker Compose setup. If the `InMemory` provider is configured, task records are not persisted in PostgreSQL.
 
 ### Diagram
-[miniexcel-async-sequence](/docs/miniexcel-async-sequence.mmd)
+[miniexcel-async-sequence](/docs/miniexcel-async-sequence-sc.mmd)

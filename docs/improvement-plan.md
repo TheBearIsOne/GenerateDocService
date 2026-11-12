@@ -23,66 +23,30 @@ The emphasis is on practical, staged improvements.
 
 ### 3.1 Durable task persistence
 
-**Current state**
-- Task repository is abstracted, but the active implementation path is lightweight.
-
-**Improve**
-- Add durable persistence for task records and task history.
-- Prefer PostgreSQL or SQL Server for task state, audit timestamps, and querying.
-
-**Why**
-- Async processing needs recoverability after restart.
-- Durable status queries are critical for clients.
-
-**How**
-- Introduce an infrastructure repository implementation using EF Core or Dapper.
-- Persist task state transitions.
-- Add migration scripts.
+**DONE** — EF Core over PostgreSQL, selected by `DocumentProcessing:Persistence:Provider`. Task state and the pending command payload are committed atomically, an outbox dispatcher claims rows under a lease, and both hosts apply migrations at startup behind a PostgreSQL advisory lock so concurrent starts cannot race on DDL. Covered by `Category=RequiresDocker` tests that run the same `ApplyDocumentProcessingMigrationsAsync` call the hosts use. See §11 item 2.
 
 ### 3.2 Security and access control
 
-**Current state**
-- API endpoints are open.
+**DONE** — JWT bearer authentication with role-based policies (`DocumentSubmit`, `DocumentRead`, `DocumentDownload`, `DocumentAdmin`). Disabled by default for local `dotnet run`, enabled in the compose stack. The signing key has **no committed default**: the host fails fast at startup when auth is enabled and the key is empty or shorter than 32 characters, so a missing secret cannot degrade into a well-known key. Health probes stay anonymous so orchestrators keep working. Nine host-level tests cover 401/403/200, expired and wrongly-signed tokens, and the startup failure. See §11 item 4.
 
-**Improve**
-- Add authentication and authorization.
-- At minimum support service-to-service auth using JWT bearer tokens.
-
-**Why**
-- Document generation often processes sensitive data.
-
-**How**
-- Add ASP.NET Core authentication/authorization.
-- Protect generation, task, and download endpoints.
-- Define roles/scopes for submit, read-status, download, and admin operations.
+**Still open**
+- No secret store or rotation story; the key arrives through configuration or `GDS_AUTH_SIGNING_KEY`.
+- No per-tenant scoping — roles are global.
 
 ### 3.3 Request validation and guardrails
 
-**Current state**
-- API contracts are simple and flexible.
+**DONE** — `GenerateDocumentRequestValidator`, applied through `ValidationRequestFilter` on the generation endpoints, enforces configurable limits on payload size (10 MB), template size (5 MB), metadata entries and key/value lengths, format and engine name lengths, and request ID length. Base64 fields are validated strictly (standard alphabet, length a multiple of four, at most two trailing `=`, no embedded whitespace) and size limits are measured against the **decoded** length, derived arithmetically so the body is decoded once, in the mapper — encoding cannot be used to exceed a limit. `payload`/`payloadBase64` and `template`/`templateBase64` are mutually exclusive. Violations return `400` with field-level detail. Configure via `DocumentProcessing:Validation`. See §11 items 3 and 12.
 
-**Improve**
-- Add validation for:
-  - payload size;
-  - template size;
-  - allowed formats;
-  - metadata limits;
-  - request timeouts/cancellation;
-  - malformed input behavior.
-
-**Why**
-- Prevent resource abuse and accidental overload.
-
-**How**
-- Add request validators in presentation/application layer.
-- Return clear 400 responses.
-- Add max size configuration.
+**Still open**
+- Limits are per-request guardrails, not a quota or admission-control model, so aggregate memory pressure under concurrency is still unbounded.
+- `MaxProcessingTimeout` in early configuration samples did not match the bound `MaxProcessingTimeoutMinutes` in either name or type, so the setting was silently dead; the current `DocumentProcessing:Resilience:ProcessingTimeoutSeconds` is bound and tested. Keep an eye on the same class of drift when adding settings.
 
 ### 3.4 Resilience policies for external dependencies
 
 **DONE**
 - Background generation retries transient faults (`HttpRequestException`, `TimeoutException`, `IOException`, `SocketException`, plus `RedisConnectionException` when Redis is enabled) up to `MaxAttempts` with exponential backoff, bounded by a `ProcessingTimeoutSeconds` deadline. Cancellation and deadline expiry are terminal and never retried.
-- `DocumentGenerationFailed` is published once after the final attempt instead of on every failure, and the task only reaches `Failed` when no attempts remain.
+- An engine can veto retry by throwing `NonRetryableGenerationException`. `TransientFailureClassifier` checks for it before any transient type at every level of the inner-exception chain, so the opt-out always wins. The `api` engine uses it: a configured target is an unknown third party whose endpoints may not be idempotent, and the request may already have been received before the failure surfaced, so an automatic retry could duplicate a side effect. `fop` keeps retrying because its converter is idempotent.
+- `DocumentGenerationFailed` is published once after the final attempt instead of on every failure, and the task only reaches `Failed` when no attempts remain. `RecordFailed` is likewise called once, so retry pressure shows up in `document_generation_duration_ms` rather than in the failure counter.
 - The FOP converter client runs through `AddStandardResilienceHandler` (per-attempt timeout, total budget, exponential retry, circuit breaker), configured via `DocumentProcessing:Fop`. The library's validation invariants are satisfied automatically, so a hand-edited configuration cannot break the first request.
 - In-memory cache and deduplication stores gained TTL and capacity bounds (`DocumentProcessing:InMemory`) so they match the Redis providers instead of growing for the lifetime of the process.
 - The retention job now also fails tasks abandoned in `Processing`, so a crashed worker cannot leave a fingerprint pinned to a task that will never finish.
@@ -107,30 +71,22 @@ The emphasis is on practical, staged improvements.
 
 ### 4.1 Dedicated worker host
 
-**Current state**
-- API host also handles background processing.
+**DONE** — `src/Host/GenerateDocService.Worker` runs the MassTransit consumer independently of HTTP ingress, reuses the same Application and Infrastructure layers, and publishes no HTTP surface. API and Worker scale separately, and compose deploys both. See §11 item 5.
 
-**Improve**
-- Split background generation into a dedicated worker process while keeping the same application core.
-
-**Why**
-- Separate scaling profile for HTTP ingress and heavy background work.
-
-**How**
-- Create `src/Host/GenerateDocService.Worker`.
-- Reuse the same application and infrastructure services.
-- Disable HTTP endpoints in the worker.
+**Still open**
+- No per-engine worker pool, so a slow heavyweight converter shares concurrency with cheap text generation. That is the bulkhead gap from §3.4.
 
 ### 4.2 Formal engine capability model
 
 **Current state**
-- Capability matching is based on `CanHandle` and metadata.
+- Capability matching is based on `CanHandle` and the `[DocumentEngine]` metadata, resolved by priority descending then name ascending.
+- The `api` engine already strains this model: its capabilities come from configuration rather than metadata, so it registers with **empty** format arrays and relies entirely on `CanHandle` consulting the configured targets. Its priority of 10 keeps purpose-built engines ahead of it, which is the only thing preventing a generic target from shadowing `fop` on `xsl-fo -> pdf`.
 
 **Improve**
 - Add explicit compatibility/cost metadata.
 
 **Why**
-- Future routing may need more than priority.
+- Future routing may need more than priority. A configuration-driven engine cannot express its capabilities statically, and "lowest priority so it loses" is a convention rather than a model.
 
 **How**
 - Extend engine descriptor with fields such as:
@@ -138,23 +94,16 @@ The emphasis is on practical, staged improvements.
   - latency class;
   - resource intensity;
   - synchronous support;
-  - asynchronous support.
+  - asynchronous support;
+  - whether capabilities are static metadata or resolved at runtime.
 
 ### 4.3 Artifact lifecycle management
 
-**Current state**
-- Artifacts are stored and downloadable, but lifecycle governance is limited.
+**DONE** — `ArtifactRetentionCleaner` deletes completed tasks and their artifacts after `RetentionDays` (30) and failed task records after `FailedTaskRetentionDays` (7), and moves tasks still `Processing` after `StuckProcessingTaskSeconds` (1800) to `Failed`. `ArtifactCleanupBackgroundService` is only its scheduler; the policy is a separate class so it is unit-testable without waiting an interval. Configure via `DocumentProcessing:Retention`. See §11 items 6 and 9.
 
-**Improve**
-- Add retention, expiration, and cleanup jobs.
-
-**Why**
-- Artifact storage grows indefinitely otherwise.
-
-**How**
-- Add expiration metadata;
-- add cleanup background job;
-- optionally add legal hold/archive strategies.
+**Still open**
+- No legal hold or archive strategy; retention is a single window per terminal state.
+- Cleanup deletes the task record and the artifact, but there is no audit trail of what was removed.
 
 ### 4.4 Stronger domain model for task lifecycle
 
@@ -214,13 +163,11 @@ The emphasis is on practical, staged improvements.
 
 ### 6.1 Expand integration coverage
 
-**Improve**
-- Add tests for:
-  - failed generation paths;
-  - invalid request validation;
-  - Redis/MinIO-enabled integration scenarios;
-  - RabbitMQ transport scenarios;
-  - download access control once auth exists.
+**DONE for every listed item** — failed generation paths, invalid request validation, Redis/MinIO-enabled scenarios, RabbitMQ transport, and download access control are all covered. Redis and MinIO use real containers with the infrastructure graph built from configuration, so the adapters are resolved exactly as the hosts resolve them. See §11 items 7, 11 and 14.
+
+**Still open**
+- No test drives one request through the Docker compose stack with all four external providers selected at once. The container tests each exercise one provider against an otherwise in-memory graph, which is not the shipped configuration. See §11 item 21.
+- The `api` engine is covered against `MockApiService`, a real Kestrel host on an ephemeral loopback port. Its `fopconverter`-backed example has only been proven to resolve the target, not to produce a PDF, because that stack was not running when it was added.
 
 ### 6.2 Add contract tests for engines
 
@@ -342,13 +289,16 @@ The emphasis is on practical, staged improvements.
 As of 2026-11-07, **Phase 1 is complete and Phase 2 is mostly complete**. See §11 for the task-level record.
 
 **Already implemented (not from §10):**
-- Clean Architecture scaffold (Domain, Application, Infrastructure, Presentation, Host, Client)
-- 8 engine plugins (fake, scriban, dotliquid, questpdf, miniexcel, miniword, minipdf, fop)
-- Template parser registry and compiled template cache (in-memory + Redis)
+- Clean Architecture structure (Domain, Application, Infrastructure, Presentation, Host, Client)
+- 9 engine plugins (fake, scriban, dotliquid, questpdf, miniexcel, miniword, minipdf, fop, api)
+- Template parser registry with engine-preferred resolution, and compiled template cache (in-memory + Redis)
 - MassTransit in-memory messaging with RabbitMQ transport option
 - Redis/RabbitMQ/MinIO infrastructure adapters
+- Binary (base64) payload and template transport
 - Health checks, correlation middleware, OpenTelemetry, Serilog
-- NBomber performance baselines (15 profiles) — documented in `docs/performance-baseline.md`
+- NBomber performance baselines (13 profiles) — documented in `docs/performance-baseline.md`
+- In-process BenchmarkDotNet microbenchmarks hosted in the sample client
+- A CI workflow that fails the build on NuGet advisories
 - Unit + integration tests
 
 **Phase 1 — complete:**
@@ -419,17 +369,23 @@ As of 2026-11-07, **Phase 1 is complete and Phase 2 is mostly complete**. See §
 13. ~~Fix template-parser selection.~~ **DONE** — `ITemplateParserRegistry.Resolve` takes an optional `preferredParserName`, and each engine now passes its own name, so a contested format resolves to the parser that can actually use the result. `engine=scriban` with `templateFormat=html` returned HTTP 500 before this and renders correctly now. Six HTTP-level combinations and the registry tie-break rules are covered by tests; without a preference the old alphabetical order is retained and pinned so changing it is deliberate.
 14. ~~Add container coverage for the Redis and MinIO adapters.~~ **DONE** — real `redis:7` and `minio/minio` containers, with the infrastructure graph built from configuration so the adapters are resolved exactly as the hosts resolve them. Covers deduplication ownership and TTL, generated-document round trip, Scriban compiled-template round trip verified by *rendering* the re-parsed template, MinIO bucket creation plus artifact round trip and deletion, and malformed storage paths. Also pins that `RedisCompiledTemplateCache` silently stores nothing for DotLiquid compilations, so those re-parse on every request under the Redis provider.
 15. ~~Fix or formally accept the four characterized MiniExcel defects.~~ **Three fixed, one accepted.** Culture: the engine now passes an `OpenXmlConfiguration` with `Culture = InvariantCulture` to both `SaveAs` and `SaveAsByTemplate`, verified by rendering a fractional value under `ru-RU` and asserting `1234.56`. Silent corruption: a nested object or array in the table path now throws `InvalidOperationException` naming the JSON path instead of writing a CLR type name into the cell. Ragged arrays: rows are aligned to the union of their keys instead of taking headers from the first item, which removes the `KeyNotFoundException`. Accepted: a template placeholder bound to a nested value still raises `IndexOutOfRangeException` from MiniExcel, because the engine cannot distinguish `{{key}}` from the supported `{{list.field}}` collection syntax without parsing the template's tokens. Both tests now state that this is a decision rather than an accident.
-16. Stream artifacts end to end. **PARTIAL** — the sync and download endpoints pass their stream to `Results.File` rather than calling `ToByteArray()`, removing one full document copy per response, and the two places that copy an engine result into a `GeneratedDocumentResult` now dispose the source. Engines, the artifact store, and the cache still each hold a complete `byte[]`, so the deeper change is outstanding; §7.4's "all engines use streaming approaches" remains inaccurate.
+16. Stream artifacts end to end. **PARTIAL** — see item 20 for what landed and what remains. The inaccurate claim this item was raised against is corrected in §7.4.
 17. ~~Stop shipping Development in the compose stack and gate developer-only surface.~~ **DONE** — compose now runs `ASPNETCORE_ENVIRONMENT=Production`, which also stops the developer exception page from returning stack traces and absolute source paths to any caller. OpenAPI and Scalar are opt-in through `DocumentProcessing:Api:ExposeOpenApi` and stay enabled in compose because they are documented; detailed health JSON is opt-in through `DocumentProcessing:Api:ExposeHealthDetails`, so anonymous probes answer with the bare status by default. Both remain automatic under Development. Three tests pin the gating.
 18. ~~Add a CI gate so NuGet advisories cannot silently return.~~ **DONE** — `.github/workflows/ci.yml` builds Release with `-p:WarningsAsErrors=NU1902%3BNU1903`, then runs both suites and uploads results. The `%3B` escape is required: a literal `;` is split by the shell and MSBuild rejects the argument with MSB1006. The gate was verified in both directions by temporarily pinning MessagePack back to 2.5.192 and confirming the build failed with the advisory URLs, then reverting.
-19. ~~Correct the remaining `localhost:7001` references.~~ **DONE** — all fifteen across README and `docs/performance-baseline.md` now use `http://localhost:5287`, and the sample client's own default base address was corrected to match.
+19. ~~Correct the remaining `localhost:7001` references.~~ **DONE** — all fifteen across README and `docs/performance-baseline.md` now use `http://localhost:5287`, which is the `dotnet run` address from `Properties/launchSettings.json`. The sample client's own default base address was changed separately and now points at `http://localhost:8081`, the Docker stack, because that is the configuration requiring a bearer token; every documented invocation passes an address explicitly, so the default only applies to a bare run. Do not "re-fix" the client default back to 5287 without changing the README examples too.
+20. ~~Finish item 16's response-path copy.~~ **PARTIAL** — the sync and download endpoints pass their stream to `Results.File` rather than calling `ToByteArray()`, removing one full document copy per response, and the two places that copy an engine result into a `GeneratedDocumentResult` now dispose the source. Engines, the artifact store, and the cache still each hold a complete `byte[]`, so the deeper change is outstanding.
+21. ~~Add a configurable engine that calls an external HTTP API.~~ **DONE** — `GenerateDocService.Engine.Api`, registered as `api`. Targets and credentials live in configuration (`DocumentProcessing:Api:Targets`), never in request data; a request may only *name* a pre-configured target through the `api.target` metadata key, so the engine cannot become an open proxy. Supports `None`, `Basic`, `Bearer` and `OAuth2ClientCredentials` with cached, skew-aware token refresh and a single in-flight fetch per token endpoint. Malformed targets fail at startup. Deliberately **no retry at any layer**: failures are wrapped in `NonRetryableGenerationException` so the processor's transient retry skips them too. Covered by `MockApiService`, a real Kestrel host on an ephemeral loopback port exercising every scheme, the unauthenticated path, the multipart contract, and a target-resolution test proving a named target cannot redirect to an arbitrary host. See §3.4 and architecture §5.5.
+22. ~~Correct §7.4's claim that all engines stream.~~ **DONE** — the claim is now corrected in place in §7.4 rather than repeated, and architecture §9 item 5 states the actual memory behaviour. Making it *true* is the remaining half of item 20.
+23. ~~Bring the documentation back in line with the code.~~ **DONE** — `docs/architecture.md` no longer claims authentication is absent or that there is no relational task store, its duplicate `Engine.QuestPdf` entry is removed, and its engine table is generated from the actual `[DocumentEngine]` attributes (nine engines, with `api`=10 through `fop`=300). `README.md` gained the missing Worker project, the four skills it never listed, and a corrected `csharp-developer` → `csharp-async` link. `README_ru.md` was truncated mid-word and has been completed and expanded. `docs/architecture_ru.md` was a one-line stub and is now a full Russian counterpart. `QWEN.md` was empty. `.github/copilot-instructions.md` no longer describes the repository as minimal.
 
 **Next tasks**
 
-20. Finish item 16: let engines write into a caller-supplied stream, and stream from the artifact store to the response and to MinIO instead of holding a full `byte[]` in the cache and store.
-21. Add a compose-level end-to-end test that drives one request with all four external providers selected at once, which is the configuration the adapter tests do not cover.
-22. Decide whether the console OpenTelemetry exporters should be conditional, now that compose runs as Production.
-23. Correct §7.4's claim that all engines stream, or make it true via item 20.
+24. Finish item 20: let engines write into a caller-supplied stream, and stream from the artifact store to the response and to MinIO instead of holding a full `byte[]` in the cache and store.
+25. Add a compose-level end-to-end test that drives one request with all four external providers selected at once, which is the configuration the adapter tests do not cover.
+26. Decide whether the console OpenTelemetry exporters should be conditional, now that compose runs as Production.
+27. Prove the `api` engine against a real `fopconverter` stack end to end. Sample client example 16 currently only demonstrates that target resolution reaches the configured URL; it has never produced a PDF, because the converter stack was down when the example was added.
+28. Capture a committed BenchmarkDotNet baseline so microbenchmark results have something to regress against.
+29. Make sample client examples `14.1` and `15.1` independent of the working directory. `OfficeFixtures.TemplateRows(path)` calls `File.ReadAllBytes` with a relative path, which resolves against the process working directory. `dotnet run` keeps the invoking shell's directory, so the documented invocation from the repository root crashes with `System.IO.FileNotFoundException: Could not find file '<repo root>\template.docx'`. The `.csproj` already copies both templates to the output directory with `CopyToOutputDirectory=Always`, so resolving against `AppContext.BaseDirectory` would work from any directory and make that copy meaningful. The exception is also unhandled — it escapes while the request argument is being built, so it terminates the client instead of being reported as one failed example. Verified by running `14.1` from the repository root (crashes) and from the project directory (reaches the HTTP calls).
 
 ---
 
@@ -437,5 +393,6 @@ As of 2026-11-07, **Phase 1 is complete and Phase 2 is mostly complete**. See §
 
 Do not rewrite the solution.
 
-The current architecture is good enough to evolve incrementally.
-The highest-value path is controlled hardening of persistence, security, resilience, and operations while preserving the current plugin and modular monolith structure.
+The current architecture is good enough to evolve incrementally, and the persistence, security, validation and resilience work that once justified a "not production-ready" verdict is now done and tested.
+
+The highest-value remaining path is resource handling and operational maturity: end-to-end streaming (item 24), a full-stack compose test (item 25), and a committed performance baseline (item 28) — while preserving the plugin and modular monolith structure. The `api` engine adds one new consideration to that list: the service now delegates to arbitrary configured third parties, so engine sandboxing (§8.2) is a more pressing question than it was when every engine ran in-process.

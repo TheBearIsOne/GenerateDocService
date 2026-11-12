@@ -2,36 +2,35 @@
 
 ## Overview
 
-Initial Clean Architecture scaffold for a high-load document generation and transformation service on .NET.
+A working Clean Architecture service for high-load document generation and transformation on .NET 10 — past the scaffold stage: every provider below has a real implementation, and the persistence, security, and resilience work in `docs/improvement-plan.md` Phase 1 is complete.
 
-Current first iteration includes:
+What the service does today:
 
 - solution and project structure for Domain, Application, Infrastructure, Presentation, Host, and Client;
-- engine abstractions;
-- first real engine module based on Scriban templates;
-- second template engine based on DotLiquid;
-- QuestPDF PDF generation engine scaffold;
-- Apache FOP-compatible XSL-FO-to-PDF conversion through an external HTTP service;
-- template parser registry for pluggable template providers;
-- in-memory compiled template cache foundation for template parsers;
-- Redis-backed compiled template cache support;
-- metadata-driven engine registry and task repository;
+- engine abstractions with a plugin registry discovered by assembly scanning;
+- nine generation engines: `fake`, `scriban`, `dotliquid`, `questpdf`, `miniexcel`, `miniword`, `minipdf`, `fop`, and the configurable `api` engine;
+- template parser registry for pluggable template providers, with engine-preferred parser resolution;
+- compiled template cache with in-memory and Redis-backed implementations;
 - automatic engine selection by capability and priority when `engine` is omitted;
-- async messaging contracts and MassTransit-based background processing pipeline scaffold;
-- in-memory deduplication and generated document cache abstractions ready for Redis replacement;
-- infrastructure options for Redis-backed cache/deduplication and object storage providers;
-- MinIO-based object storage adapter and local Docker Compose environment;
-- liveness and readiness health checks for engines and infrastructure dependencies;
+- text **and binary** request transport — `payload`/`template` or their `payloadBase64`/`templateBase64` equivalents, which is what makes the Office-file engines callable over HTTP;
+- async messaging contracts and MassTransit-based background processing, with an in-memory or RabbitMQ transport;
+- durable task persistence through EF Core and PostgreSQL, with advisory-locked migrations applied at startup and an outbox-backed dispatch;
+- request deduplication and generated-document caching, in-memory or Redis-backed;
+- bounded retry with exponential backoff, a processing deadline, and per-engine opt-out through `NonRetryableGenerationException`;
+- artifact retention and cleanup, including reaping tasks abandoned in `Processing`;
+- JWT bearer authentication with role-based authorization, disabled for local `dotnet run` and mandatory in the Docker stack;
+- configurable request validation guardrails for payload, template, metadata, and name lengths;
+- MinIO-based object storage adapter and a local Docker Compose environment;
+- liveness and readiness health checks for engines and every selected infrastructure provider;
 - correlation id middleware for HTTP entry points and async pipeline propagation;
 - Serilog console logging enriched with correlation id;
 - OpenTelemetry tracing for ASP.NET Core, outgoing HTTP calls, and MassTransit activity source;
 - custom OpenTelemetry metrics for sync requests, async requests, completions, failures, and generation duration;
-- OpenAPI metadata for current endpoints;
-- demo `fake` generation engine;
+- OpenAPI metadata with a Scalar UI, both gated behind `DocumentProcessing:Api:ExposeOpenApi` outside Development;
 - sync and async HTTP endpoints;
-- sample .NET client;
-- NBomber-based performance baseline project;
-- unit and integration test coverage.
+- a sample .NET client with an interactive menu over sixteen examples, plus hosted BenchmarkDotNet microbenchmarks;
+- NBomber-based end-to-end performance baseline project;
+- unit and integration test coverage, including Testcontainers-backed PostgreSQL, RabbitMQ, Redis, and MinIO tests that skip cleanly without Docker.
 
 ## Architecture at a glance
 
@@ -61,8 +60,11 @@ The project is therefore designed for both developer ergonomics and production-m
 
 ## Documentation
 
-- Architecture and call-flow diagrams: `docs/architecture.md`
+- Architecture and call-flow diagrams: `docs/architecture.md` (Russian: `docs/architecture_ru.md`)
 - Improvement plan and roadmap: `docs/improvement-plan.md`
+- Benchmark matrix and how to read the reports: `docs/performance-baseline.md`
+- End-to-end walkthrough of the `miniexcel` async path: `docs/miniexcel-async-sequence.md` (Russian: `docs/miniexcel-async-sequence_ru.md`)
+- Russian overview of this file: `README_ru.md`
 
 ## Projects
 
@@ -80,6 +82,7 @@ The project is therefore designed for both developer ergonomics and production-m
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Infrastructure`
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Presentation`
 - `src/Host/GenerateDocService.Api`
+- `src/Host/GenerateDocService.Worker`
 - `src/Clients/GenerateDocService.SampleClient`
 - `tests/Unit/GenerateDocService.DocumentProcessing.Application.Tests`
 - `tests/Integration/GenerateDocService.Api.IntegrationTests`
@@ -531,9 +534,13 @@ Current endpoints:
 Health checks cover:
 
 - registered document engines;
-- Redis connectivity when Redis provider is enabled;
-- RabbitMQ TCP readiness when RabbitMQ transport is enabled;
-- MinIO/object storage TCP readiness when object storage provider is enabled.
+- the selected cache provider — Redis connectivity when Redis is enabled, otherwise a static in-memory check;
+- the selected persistence provider — PostgreSQL connectivity when PostgreSQL is enabled, otherwise a static in-memory check;
+- the selected messaging transport — RabbitMQ TCP readiness when RabbitMQ is enabled, otherwise a static in-memory check;
+- the selected artifact store — MinIO bucket readiness when object storage is enabled, otherwise a static in-memory check;
+- an `authentication` check reporting that authorization is configured.
+
+Each registration is tagged `live`, `ready`, or both: `/health/live` reports only the `live`-tagged checks, so it stays green while an external dependency is down, and `/health/ready` includes the provider checks that gate traffic. The in-memory fallbacks carry both tags because there is no external dependency to wait for.
 
 ### Developer surface exposure
 
@@ -809,7 +816,7 @@ dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://local
 dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:5287 engines
 ```
 
-The menu covers all nine engines across sixteen examples: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel` (table path, template path, and an invoice template with repeating `{{items.*}}` data rows), `miniword` (a single-record form and a multi-paragraph invoice), `minipdf`, `fop`, `api` (the generic engine against the configured `converter` target), and two auto-selection examples that omit `engine`. Text output is printed inline; PDF, XLSX and DOCX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `q` (quit).
+The menu covers all nine engines across eighteen entries — the sixteen numbered examples plus two variants, `14.1` and `15.1`, that reuse examples 14 and 15 but load their template from a file instead of building it in memory: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel` (table path, template path, and an invoice template with repeating `{{items.*}}` data rows), `miniword` (a single-record form and a multi-paragraph invoice), `minipdf`, `fop`, `api` (the generic engine against the configured `converter` target), and two auto-selection examples that omit `engine`. Text output is printed inline; PDF, XLSX and DOCX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `b` (benchmarks), `q` (quit).
 
 Set `GDS_SAMPLE_TOKEN` to attach a bearer token, which the Docker stack requires:
 
@@ -818,7 +825,25 @@ $env:GDS_SAMPLE_TOKEN = New-GdsToken   # see "Getting a token" above
 dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:8081
 ```
 
-The binary examples build their `.docx` and `.xlsx` fixtures in memory (`OfficeFixtures`), so the client is self-contained and needs no files on disk. The `minipdf` example chains two calls: it generates a workbook through `miniexcel` first, then feeds those bytes back as a base64 payload.
+Examples 1–16 build their `.docx` and `.xlsx` fixtures in memory (`OfficeFixtures`), so those are self-contained and need no files on disk. The `minipdf` example chains two calls: it generates a workbook through `miniexcel` first, then feeds those bytes back as a base64 payload.
+
+The two variants `14.1` and `15.1` instead read a real template from disk through `OfficeFixtures.TemplateRows(path)`, which calls `File.ReadAllBytes` with a **relative** path:
+
+| Example | File read |
+|---------|-----------|
+| `14.1` | `template.docx` |
+| `15.1` | `template.xlsx` |
+
+Both files are committed under `src/Clients/GenerateDocService.SampleClient/` and the `.csproj` copies them to the output directory. That copy does **not** make them findable, because a relative path resolves against the process working directory and `dotnet run` keeps the working directory of the shell that invoked it. Run from the repository root, `14.1` therefore fails with `System.IO.FileNotFoundException: Could not find file '<repo root>\template.docx'` — and because the exception escapes the request-building argument, it is unhandled and takes the client down rather than being reported as a failed example.
+
+To run those two today, invoke the client from the project directory so the working directory holds the templates:
+
+```powershell
+cd src\Clients\GenerateDocService.SampleClient
+dotnet run -- http://localhost:5287 14.1
+```
+
+Resolving the path against `AppContext.BaseDirectory` instead of the working directory would make them work from anywhere; that is tracked as `docs/improvement-plan.md` §11 item 29.
 
 ## Validation
 
@@ -843,8 +868,12 @@ Repository guidance for Copilot is stored in:
 - `.github/skills/documentation-work/SKILL.md`
 - `.github/skills/service-design/SKILL.md`
 - `.github/skills/document-generation/SKILL.md`
-- `.github/skills/testing/SKILL.md`
 - `.github/skills/api-service/SKILL.md`
+- `.github/skills/infrastructure/SKILL.md`
+- `.github/skills/resilience/SKILL.md`
+- `.github/skills/security/SKILL.md`
+- `.github/skills/testing/SKILL.md`
+- `.github/skills/csharp-async/SKILL.md`
 - `.github/skills/senior-architect/SKILL.md`
-- `.github/skills/csharp-developer/SKILL.md`
-<!--  -->
+
+Diagram conventions for generated Mermaid live in `.github/instructions/mermaid.instructions.md`, and C# conventions in `.github/instructions/csharp.instructions.md`.
