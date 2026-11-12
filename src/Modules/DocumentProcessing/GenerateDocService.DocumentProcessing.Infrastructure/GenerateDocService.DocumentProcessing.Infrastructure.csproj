@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GenerateDocService.DocumentProcessing.Application\GenerateDocService.DocumentProcessing.Application.csproj" />
+    <ProjectReference Include="..\..\..\Engines\GenerateDocService.Engine.Api\GenerateDocService.Engine.Api.csproj" />
     <ProjectReference Include="..\..\..\Engines\GenerateDocService.Engine.Scriban\GenerateDocService.Engine.Scriban.csproj" />
     <ProjectReference Include="..\..\..\Engines\GenerateDocService.Engine.QuestPdf\GenerateDocService.Engine.QuestPdf.csproj" />
     <ProjectReference Include="..\..\..\Engines\GenerateDocService.Engine.DotLiquid\GenerateDocService.Engine.DotLiquid.csproj" />

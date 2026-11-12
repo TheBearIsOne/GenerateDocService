@@ -36,6 +36,16 @@ services:
       # The FOP converter runs in a separate compose project, so the in-container
       # default of localhost:8080 would resolve to this container instead.
       DocumentProcessing__Fop__BaseUrl: ${FOP_CONVERTER_BASE_URL:-http://host.docker.internal:8080/}
+      # The generic api engine pointed at the same converter, so the sample client's api-engine
+      # example works against this stack. The converter only accepts a multipart primaryDocument
+      # part, which is what MultipartFieldName selects.
+      DocumentProcessing__Api__Targets__converter__BaseUrl: ${FOP_CONVERTER_BASE_URL:-http://host.docker.internal:8080/}
+      DocumentProcessing__Api__Targets__converter__RequestPath: 'api/v1/convert/sync?payloadType=XSL_FO&outputFormat=PDF&correlationId={correlationId}'
+      DocumentProcessing__Api__Targets__converter__ContentType: application/xml
+      DocumentProcessing__Api__Targets__converter__MultipartFieldName: primaryDocument
+      DocumentProcessing__Api__Targets__converter__InputFormat: xsl-fo
+      DocumentProcessing__Api__Targets__converter__OutputFormat: pdf
+      DocumentProcessing__Api__Targets__converter__TimeoutSeconds: '120'
     extra_hosts:
       # Makes host.docker.internal resolve on Linux Docker Engine as well as Docker Desktop.
       - "host.docker.internal:host-gateway"
@@ -77,6 +87,13 @@ services:
       DocumentProcessing__Persistence__PostgreSql__ConnectionString: Host=postgres;Port=5432;Database=generatedocservice;Username=postgres;Password=postgres
       # The worker performs the async generation, so it needs the converter too.
       DocumentProcessing__Fop__BaseUrl: ${FOP_CONVERTER_BASE_URL:-http://host.docker.internal:8080/}
+      DocumentProcessing__Api__Targets__converter__BaseUrl: ${FOP_CONVERTER_BASE_URL:-http://host.docker.internal:8080/}
+      DocumentProcessing__Api__Targets__converter__RequestPath: 'api/v1/convert/sync?payloadType=XSL_FO&outputFormat=PDF&correlationId={correlationId}'
+      DocumentProcessing__Api__Targets__converter__ContentType: application/xml
+      DocumentProcessing__Api__Targets__converter__MultipartFieldName: primaryDocument
+      DocumentProcessing__Api__Targets__converter__InputFormat: xsl-fo
+      DocumentProcessing__Api__Targets__converter__OutputFormat: pdf
+      DocumentProcessing__Api__Targets__converter__TimeoutSeconds: '120'
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

@@ -5,6 +5,7 @@
   </Folder>
   <Folder Name="/src/Engines/">
     <Project Path="src/Engines/GenerateDocService.Engine.Abstractions/GenerateDocService.Engine.Abstractions.csproj" />
+    <Project Path="src/Engines/GenerateDocService.Engine.Api/GenerateDocService.Engine.Api.csproj" />
     <Project Path="src/Engines/GenerateDocService.Engine.DotLiquid/GenerateDocService.Engine.DotLiquid.csproj" />
     <Project Path="src/Engines/GenerateDocService.Engine.Fop/GenerateDocService.Engine.Fop.csproj" />
     <Project Path="src/Engines/GenerateDocService.Engine.MiniExcel/GenerateDocService.Engine.MiniExcel.csproj" />

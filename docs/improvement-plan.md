@@ -292,8 +292,10 @@ The emphasis is on practical, staged improvements.
 - Added `miniword` engine for template-driven .docx generation using `{{tag}}` syntax.
 - Added `minipdf` engine for .docx/.xlsx-to-PDF conversion.
 - Added `fop` engine for FO/XSL-FO-to-PDF conversion through the external FOP Converter API.
-- All engines use streaming approaches to minimize memory usage.
-- Registered priorities: miniword=100, miniexcel=150, minipdf=250.
+- Added `api` engine: a configurable generalisation of `fop` that posts the payload to a named external HTTP target and returns the response as the document. Targets and their credentials live in configuration, never in the request, so a caller can select a pre-approved target but cannot supply a URL or a secret. Supports `None`, `Basic`, `Bearer` and `OAuth2ClientCredentials` (with cached, skew-aware token refresh and a single in-flight fetch). Covered by a mock HTTP service exercising every scheme plus the unauthenticated path.
+- Registered priorities: api=10, miniword=100, miniexcel=150, minipdf=250, fop=300.
+
+**Correction:** the claim that "all engines use streaming approaches to minimize memory usage" was never accurate and still is not — every engine materialises its whole document as a `byte[]`. See item 16.
 
 **Improve**
 - Add more formats and engines, for example:
@@ -302,7 +304,9 @@ The emphasis is on practical, staged improvements.
   - image rendering.
 
   The FOP adapter uses synchronous HTTP conversion, now wrapped in a standard resilience handler
-  (timeout, retry, circuit breaker) — see §3.4.
+  (timeout, retry, circuit breaker) — see §3.4. The `api` engine deliberately has **no** retry,
+  because a configured target is an unknown third party whose endpoints may not be idempotent; it
+  applies a per-target timeout instead.
 
 ---
 

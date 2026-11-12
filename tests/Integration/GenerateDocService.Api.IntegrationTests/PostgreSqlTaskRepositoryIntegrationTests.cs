@@ -18,29 +18,43 @@ public sealed class PostgreSqlTaskRepositoryIntegrationTests : IClassFixture<Pos
     {
         Skip.If(_fixture.Services is null, _fixture.UnavailabilityReason);
 
-        using var scope = _fixture.Services!.CreateScope();
-        var repository = scope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>();
-        repository.Should().BeOfType<PostgreSqlDocumentGenerationTaskRepository>();
-
         var taskId = $"pg-{Guid.NewGuid():N}";
-        await repository.AddAsync(new DocumentGenerationTask(taskId, "req-pg", "scriban", "txt"));
 
-        var loaded = await repository.GetAsync(taskId);
-        loaded.Should().NotBeNull();
-        loaded!.Status.Should().Be(GenerationTaskStatus.Queued);
-        loaded.Engine.Should().Be("scriban");
-        loaded.OutputFormat.Should().Be("txt");
+        // Separate scopes per phase. GetAsync is AsNoTracking, so reading and then updating inside
+        // the scope that added the task would attach a second instance under the same key and EF
+        // would reject it. Production never mixes the two in one scope either.
+        using (var addScope = _fixture.Services!.CreateScope())
+        {
+            var repository = addScope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>();
+            repository.Should().BeOfType<PostgreSqlDocumentGenerationTaskRepository>();
 
-        loaded.MarkCompleted($"{taskId}.txt", $"artifacts/req-pg/{taskId}.txt");
-        await repository.UpdateAsync(loaded);
+            await repository.AddAsync(new DocumentGenerationTask(taskId, "req-pg", "scriban", "txt"));
+        }
 
-        var completed = await repository.GetAsync(taskId);
+        using (var updateScope = _fixture.Services!.CreateScope())
+        {
+            var repository = updateScope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>();
+
+            var loaded = await repository.GetAsync(taskId);
+            loaded.Should().NotBeNull();
+            loaded!.Status.Should().Be(GenerationTaskStatus.Queued);
+            loaded.Engine.Should().Be("scriban");
+            loaded.OutputFormat.Should().Be("txt");
+
+            loaded.MarkCompleted($"{taskId}.txt", $"artifacts/req-pg/{taskId}.txt");
+            await repository.UpdateAsync(loaded);
+        }
+
+        using var verifyScope = _fixture.Services!.CreateScope();
+        var verifier = verifyScope.ServiceProvider.GetRequiredService<IDocumentGenerationTaskRepository>();
+
+        var completed = await verifier.GetAsync(taskId);
         completed!.Status.Should().Be(GenerationTaskStatus.Completed);
         completed.ResultFileName.Should().Be($"{taskId}.txt");
         completed.ResultStoragePath.Should().Be($"artifacts/req-pg/{taskId}.txt");
 
-        await repository.DeleteAsync(taskId);
-        (await repository.GetAsync(taskId)).Should().BeNull();
+        await verifier.DeleteAsync(taskId);
+        (await verifier.GetAsync(taskId)).Should().BeNull();
     }
 
     [SkippableFact]

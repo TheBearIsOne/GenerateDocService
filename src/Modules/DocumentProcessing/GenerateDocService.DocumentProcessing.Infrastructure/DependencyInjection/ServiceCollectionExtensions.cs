@@ -16,6 +16,7 @@ using Microsoft.Extensions.Http.Resilience;
 using Npgsql;
 using Polly;
 using GenerateDocService.Engine.Abstractions;
+using GenerateDocService.Engine.Api;
 using GenerateDocService.Engine.DotLiquid;
 using GenerateDocService.Engine.Fop;
 using GenerateDocService.Engine.MiniExcel;
@@ -39,11 +40,13 @@ public static class ServiceCollectionExtensions
     {
         services.AddDocumentProcessingApplication();
         services.AddDocumentProcessingResilience(configuration);
+        services.AddDocumentProcessingApiTargets(configuration);
         services.AddTemplateParsers(
             typeof(ScribanTemplateParser).Assembly,
             typeof(DotLiquidTemplateParser).Assembly);
         services.AddDocumentGenerationEngines(
             typeof(FakeDocumentGenerationEngine).Assembly,
+            typeof(ApiDocumentGenerationEngine).Assembly,
             typeof(ScribanDocumentGenerationEngine).Assembly,
             typeof(QuestPdfDocumentGenerationEngine).Assembly,
             typeof(DotLiquidDocumentGenerationEngine).Assembly,
@@ -175,6 +178,37 @@ public static class ServiceCollectionExtensions
                 options.CircuitBreaker.SamplingDuration = samplingDuration;
                 options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(fopOptions.CircuitBreakerBreakDurationSeconds);
             });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the named external API targets the <c>api</c> engine can call. Targets are
+    /// configuration-only, so a request may choose a target by name but can never supply a URL or a
+    /// credential, which is what keeps the engine from becoming an open proxy.
+    /// </summary>
+    private static IServiceCollection AddDocumentProcessingApiTargets(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.Configure<DocumentProcessingApiOptions>(
+            configuration.GetSection(DocumentProcessingApiOptions.SectionName));
+
+        var apiOptions = configuration
+            .GetSection(DocumentProcessingApiOptions.SectionName)
+            .Get<DocumentProcessingApiOptions>()
+            ?? new DocumentProcessingApiOptions();
+
+        // Fail at startup rather than on the first request, matching the FOP base URL check.
+        apiOptions.Validate();
+
+        // No resilience handler here on purpose: a configured target is an unknown third party whose
+        // endpoints may not be idempotent, so an automatic retry could duplicate a side effect. Each
+        // target still gets its own TimeoutSeconds deadline through a linked cancellation token.
+        services.AddHttpClient(ApiDocumentGenerationEngine.HttpClientName);
+        services.AddHttpClient(ApiAuthTokenProvider.TokenClientName);
+
+        services.TryAddSingleton<IApiAuthTokenProvider, ApiAuthTokenProvider>();
 
         return services;
     }

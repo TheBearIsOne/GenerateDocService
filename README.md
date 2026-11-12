@@ -67,9 +67,13 @@ The project is therefore designed for both developer ergonomics and production-m
 ## Projects
 
 - `src/Engines/GenerateDocService.Engine.Abstractions`
+- `src/Engines/GenerateDocService.Engine.Api`
 - `src/Engines/GenerateDocService.Engine.Scriban`
 - `src/Engines/GenerateDocService.Engine.DotLiquid`
 - `src/Engines/GenerateDocService.Engine.QuestPdf`
+- `src/Engines/GenerateDocService.Engine.MiniExcel`
+- `src/Engines/GenerateDocService.Engine.MiniWord`
+- `src/Engines/GenerateDocService.Engine.MiniPdf`
 - `src/Engines/GenerateDocService.Engine.Fop`
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Domain`
 - `src/Modules/DocumentProcessing/GenerateDocService.DocumentProcessing.Application`
@@ -100,6 +104,7 @@ Current engines:
 - `miniword` for template-driven .docx generation from JSON payloads using `{{tag}}` syntax;
 - `minipdf` for .docx/.xlsx-to-PDF conversion (payload is base64-encoded source document).
 - `fop` for FO/XSL-FO-to-PDF conversion through the external FOP Converter API.
+- `api` for calling a configured external HTTP API and returning its response as the generated document.
 
 ### MiniExcel payload rules
 
@@ -112,6 +117,69 @@ The table path (`template` omitted) writes one row per item and applies three ru
 The template path also supports **repeating rows**: put `{{items.name}}`, `{{items.qty}}` and so on side by side in one row of the template and bind `items` to a JSON array, and MiniExcel expands that row once per record, writing numbers as numeric cells. The syntax is `{{list.field}}` — a leading `$` is *not* part of it and is left in the cell as a literal. Sample client example 15 demonstrates an invoice built this way.
 
 One MiniExcel limitation is accepted rather than fixed: on the *template* path a `{{placeholder}}` bound to a nested object or array raises an unhandled `IndexOutOfRangeException` from MiniExcel's renderer. The engine cannot reject nesting there without breaking the `{{list.field}}` collection syntax above, and cannot tell the two apart without parsing the template's tokens.
+
+### The `api` engine
+
+A generalisation of `fop`: it POSTs the payload to an external HTTP API and returns the response body as the document. Unlike `fop`, the endpoint and its credentials are **configuration, not request data**. A request may only name a pre-configured target, so the engine cannot be turned into an open proxy and no secret ever travels in a request body.
+
+```jsonc
+"DocumentProcessing": {
+  "Api": {
+    "DefaultTarget": "converter",
+    "Targets": {
+      "converter": {
+        "BaseUrl": "http://localhost:8080/",
+        "RequestPath": "api/v1/convert/sync?payloadType=XSL_FO&outputFormat=PDF&correlationId={correlationId}",
+        "Method": "Post",
+        "ContentType": "application/xml",
+        "InputFormat": "xsl-fo",
+        "OutputFormat": "pdf",
+        "TimeoutSeconds": 120,
+        "Authentication": { "Scheme": "None" }
+      },
+      "secure": {
+        "BaseUrl": "https://api.example.com/",
+        "RequestPath": "v1/documents",
+        "InputFormat": "json",
+        "OutputFormat": "pdf",
+        "Authentication": {
+          "Scheme": "OAuth2ClientCredentials",
+          "TokenUrl": "https://id.example.com/connect/token",
+          "ClientId": "gds",
+          "ClientSecret": "set-this-through-configuration-not-source-control",
+          "Scope": "documents.convert",
+          "TokenExpirySkewSeconds": 30
+        }
+      }
+    }
+  }
+}
+```
+
+A request selects a target with the `api.target` metadata key; without it the engine uses `DefaultTarget`, and failing that the first target by name whose declared formats match. `InputFormat` and `OutputFormat` on a target are optional — omit them and the target matches any format. `{requestId}` and `{correlationId}` in `RequestPath` are substituted per request.
+
+The payload is sent as the raw request body with `ContentType`, unless `MultipartFieldName` is set — then it is sent as a `multipart/form-data` part under that name, which is what the FOP converter expects (`primaryDocument`). `Method` is `Post` (default) or `Put`.
+
+`Authentication:Scheme` is one of:
+
+| Scheme | Required fields | Header sent |
+|--------|-----------------|-------------|
+| `None` | — | none |
+| `Basic` | `Username`, `Password` | `Authorization: Basic base64(user:pass)` |
+| `Bearer` | `Token` | `Authorization: Bearer <token>` |
+| `OAuth2ClientCredentials` | `TokenUrl`, `ClientId`, `ClientSecret`, optional `Scope` | `Authorization: Bearer <fetched token>` |
+
+Client-credentials tokens are cached per token endpoint and client and refreshed `TokenExpirySkewSeconds` before expiry, so a busy target does not call the identity provider per document. Concurrent requests share a single in-flight token fetch.
+
+Misconfigured targets throw at **startup**, not on the first request. There is deliberately **no retry at any layer**: the engine wraps upstream failures in `NonRetryableGenerationException`, so the background processor's transient-fault retry skips them as well. A configured target is an unknown third party whose endpoints may not be idempotent, and the request may already have been received before the failure, so an automatic retry could duplicate a side effect. Each target gets a `TimeoutSeconds` deadline instead, and the caller decides whether to resubmit.
+
+The purpose-built `fop` engine is the opposite case: its converter is idempotent, so it keeps both the HTTP resilience pipeline from §Resilience and retries and the processor's transient retries.
+
+Because capabilities come from configuration, the engine registers with empty format metadata — `/api/v1/engines` lists it with no formats, while auto-selection still resolves it correctly through `CanHandle`. Its priority is 10, so a purpose-built engine wins when both could serve a request.
+
+A target named `converter` is preconfigured in `appsettings.Development.json` and in the compose stack, pointing at the FOP converter with the multipart shape it requires. It is what sample client example 16 drives, so the generic engine can be compared against the purpose-built `fop` engine against the same upstream. Remove it if you do not want the `api` engine to also claim `xsl-fo -> pdf`.
+
+Credentials belong in environment variables, not in `appsettings.json`, which is committed — for example `DocumentProcessing__Api__Targets__secure__Authentication__ClientSecret`.
 
 This keeps the current modular monolith ready for future extraction of engines into isolated modules or services.
 
@@ -741,7 +809,7 @@ dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://local
 dotnet run --project src/Clients/GenerateDocService.SampleClient -- http://localhost:5287 engines
 ```
 
-The menu covers all eight engines across fifteen examples: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel` (table path, template path, and an invoice template with repeating `{{items.*}}` data rows), `miniword` (a single-record form and a multi-paragraph invoice), `minipdf`, `fop`, and two auto-selection examples that omit `engine`. Text output is printed inline; PDF, XLSX and DOCX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `q` (quit).
+The menu covers all nine engines across sixteen examples: `fake`, `scriban` (text, HTML, Markdown, plus the full async submit/poll/download flow), `dotliquid`, `questpdf`, `miniexcel` (table path, template path, and an invoice template with repeating `{{items.*}}` data rows), `miniword` (a single-record form and a multi-paragraph invoice), `minipdf`, `fop`, `api` (the generic engine against the configured `converter` target), and two auto-selection examples that omit `engine`. Text output is printed inline; PDF, XLSX and DOCX output is written to `output/` beside the client binary. Menu commands are `0`/`all`, `e` (engines), `m` (menu), `q` (quit).
 
 Set `GDS_SAMPLE_TOKEN` to attach a bearer token, which the Docker stack requires:
 

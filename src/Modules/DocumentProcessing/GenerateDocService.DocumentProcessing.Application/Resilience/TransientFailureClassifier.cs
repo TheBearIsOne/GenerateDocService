@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using GenerateDocService.Engine.Abstractions;
 
 namespace GenerateDocService.DocumentProcessing.Application.Resilience;
 
@@ -37,6 +38,13 @@ public sealed class TransientFailureClassifier
 
         for (var current = exception; current is not null; current = current.InnerException)
         {
+            // An engine that cannot guarantee its upstream is idempotent opts out of retrying, and
+            // that decision outranks any transient fault it wraps.
+            if (current is NonRetryableGenerationException)
+            {
+                return false;
+            }
+
             // Cancellation outranks any transient inner fault: a caller abort or an expired
             // processing deadline must not be retried into another full attempt.
             if (current is OperationCanceledException)

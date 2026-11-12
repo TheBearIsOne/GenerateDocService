@@ -59,6 +59,18 @@ public sealed class TransientFailureClassifierTests
     }
 
     [Fact]
+    public void IsTransient_ShouldReturnFalse_WhenTheEngineOptedOutOfRetries()
+    {
+        // The api engine wraps upstream failures this way, because the request may already have
+        // reached a third party whose endpoint is not idempotent.
+        var wrapped = new GenerateDocService.Engine.Abstractions.NonRetryableGenerationException(
+            "API target 'x' failed",
+            new HttpRequestException("connection reset"));
+
+        _classifier.IsTransient(wrapped).Should().BeFalse();
+    }
+
+    [Fact]
     public void Constructor_ShouldRejectNonExceptionType()
     {
         var act = () => new TransientFailureClassifier(typeof(string));

@@ -16,6 +16,7 @@ using System.Reflection;
 using System.Text;
 using GenerateDocService.DocumentProcessing.Domain.Tasks;
 using GenerateDocService.DocumentProcessing.Presentation.Contracts;
+using GenerateDocService.Engine.Api;
 
 var baseAddress = args.Length > 0 ? args[0] : "http://localhost:8081";
 var selection = args.Length > 1 ? args[1] : null;
@@ -383,9 +384,43 @@ static List<EngineExample> BuildExamples()
                     "miniexcel", "json", "xlsx", "xlsx",
                     payload: OfficeFixtures.InvoiceXlsxPayload,
                     templateBase64: Convert.ToBase64String(OfficeFixtures.TemplateRows("template.xlsx"))),
-                "miniexcel invoice"))
+                "miniexcel invoice")),
+
+        new EngineExample(
+            "16",
+            "api",
+            "xsl-fo -> pdf",
+            "Generic api engine: multipart call to the configured 'converter' target (needs FOP up)",
+            client => RunSyncAsync(
+                client,
+                ApiTargetRequest("converter", "xsl-fo", "pdf", FopExample.XslFoPayload),
+                "api engine -> configured target"))
     ];
 }
+
+/// <summary>
+/// Builds a request for the generic <c>api</c> engine. The target is named, never addressed: the
+/// URL and any credentials stay in server configuration, so the request cannot aim the service at an
+/// arbitrary host.
+/// </summary>
+static GenerateDocumentHttpRequest ApiTargetRequest(
+    string target,
+    string inputFormat,
+    string outputFormat,
+    string payload)
+    => new(
+        RequestId: Guid.NewGuid().ToString("N"),
+        Engine: "api",
+        InputFormat: inputFormat,
+        OutputFormat: outputFormat,
+        TemplateFormat: null,
+        Payload: payload,
+        Template: null,
+        Metadata: new Dictionary<string, string>
+        {
+            ["client"] = "sample",
+            [DocumentProcessingApiOptions.TargetMetadataKey] = target
+        });
 
 static GenerateDocumentHttpRequest BinaryRequest(
     string? engine,
